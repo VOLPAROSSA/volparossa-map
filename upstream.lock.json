@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "project": "Organic Maps",
+  "repository": "https://github.com/organicmaps/organicmaps.git",
+  "release": "2026.09.29-32-android",
+  "release_url": "https://github.com/organicmaps/organicmaps/releases/tag/2026.09.29-32-android",
+  "release_published_at": "2026-09-29T21:16:46Z",
+  "tag_object": "1253338dcd7bc6c1871e4a613468187e1d1e93e6",
+  "commit": "b20d1417eef1e3c63a447ac8658db4307a066024",
+  "verified_on": "2026-09-30",
+  "verification": {
+    "official_latest_github_release": true,
+    "draft": false,
+    "prerelease": false,
+    "annotated_tag_peeled_with_git_ls_remote": true,
+    "source_sha256": "Exact-commit raw source responses; bounded, no checkout or build",
+    "platform_scope": "Android release tag; common and iOS sources inspected at this commit, not an iOS store-release or build claim"
+  },
+  "licenses": {
+    "source": "Apache-2.0",
+    "source_license": "LICENSES/Apache-2.0.txt",
+    "notice": "NOTICE",
+    "data_license": "DATA_LICENSE.txt",
+    "binary_data_license_is_separate": true,
+    "binary_data_white_label_permission_verified": false,
+    "third_party_notices": [
+      ".reuse/dep5",
+      "data/copyright.html",
+      "3party",
+      "tools/osmctools"
+    ]
+  },
+  "inspection": {
+    "upstream_files_modified": false,
+    "native_patch_applied": false,
+    "source_checkout_created": false,
+    "dependencies_installed": false,
+    "app_built": false,
+    "map_data_downloaded_or_redistributed": false,
+    "live_traffic_backend_verified": false
+  },
+  "files": [
+    {
+      "path": "LICENSE",
+      "bytes": 23,
+      "sha256": "963dcc022dd2394e5455c501f1e488688af97532b39c7d04edcaf3413a4243c3",
+      "kind": "symlink",
+      "target": "LICENSES/Apache-2.0.txt"
+    },
+    {
+      "path": "LICENSES/Apache-2.0.txt",
+      "bytes": 10280,
+      "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff"
+    },
+    {
+      "path": "NOTICE",
+      "bytes": 1608,
+      "sha256": "5a6de5958934e42968c20ff6d98fada69079b66b60de67d551c68aff1bbf8014"
+    },
+    {
+      "path": "DATA_LICENSE.txt",
+      "bytes": 2679,
+      "sha256": "bb87255dc294bea53cb32d764b87a46a13dcf1bfe19fe942244ab5a30f787982"
+    },
+    {
+      "path": "private.h",
+      "bytes": 927,
+      "sha256": "18a5fdce939c88cfa9f18af5e2affc1e1f6a627a95977a101eb59890fa632af1"
+    },
+    {
+      "path": "libs/traffic/traffic_info.hpp",
+      "bytes": 5579,
+      "sha256": "92c754221ad61ba648727a6b5f64c1543699e20fff2d6cced70aec1585f8b9b9"
+    },
+    {
+      "path": "libs/traffic/traffic_info.cpp",
+      "bytes": 14729,
+      "sha256": "6c87afd613683d40c0216b84226c7cb620fbc43233feb7e3862fa771c46d083f"
+    },
+    {
+      "path": "libs/traffic/speed_groups.hpp",
+      "bytes": 1303,
+      "sha256": "4301dcedfdd169e4d34828d979e81219f27e3bcfb316ba311b9f461603f8d118"
+    },
+    {
+      "path": "libs/traffic/speed_groups.cpp",
+      "bytes": 940,
+      "sha256": "15f58aae40d8d9bedebe0cb57729cdb16920d3dc7fed450c052741c113539329"
+    },
+    {
+      "path": "libs/map/traffic_manager.hpp",
+      "bytes": 5419,
+      "sha256": "3fde31cbe6fdae8019151dc8365ae487bc807a75775a5adfdb9a074977512ba8"
+    },
+    {
+      "path": "libs/map/traffic_manager.cpp",
+      "bytes": 14648,
+      "sha256": "9d232a4ef1017ce354a0433d8dd7dbcc72ed28b834aba89d0147654bdc605e6e"
+    },
+    {
+      "path": "libs/routing/routing_session.cpp",
+      "bytes": 29230,
+      "sha256": "35fc58a9879581cf0dd6057656e13af37163422269746ed93936441d874cc36b"
+    },
+    {
+      "path": "libs/routing/edge_estimator.cpp",
+      "bytes": 19633,
+      "sha256": "fae1f8b8f712d79e622ad5d74199705c0bd8b8920d20e8a88bc8caa31b7edac4"
+    },
+    {
+      "path": "libs/storage/map_files_downloader.hpp",
+      "bytes": 5075,
+      "sha256": "493a02bbbbfa6e75f1d050276012fd3bee23bddf22a47ddca4af55dc03b13900"
+    },
+    {
+      "path": "libs/storage/storage.cpp",
+      "bytes": 62871,
+      "sha256": "5b1011709fd62cf6817e232819ca3efc10efd16562e97d98efe450335e952867"
+    },
+    {
+      "path": "libs/coding/blake3.hpp",
+      "bytes": 1975,
+      "sha256": "f86dfa9af1e904383b5a567f7c6c887c0f909b6af7a967f9392e75fb3fc8a553"
+    }
+  ]
+}

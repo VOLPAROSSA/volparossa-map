@@ -1,3 +1,5 @@
+![VOLPAROSSA Map banner with a fox formed from golden topographic contours and mountain trails](docs/assets/banner-volparossa-map.png)
+
 # Project VOLPAROSSA Map
 
 **Organic Maps connected to the VOLPAROSSA cooperative network.**

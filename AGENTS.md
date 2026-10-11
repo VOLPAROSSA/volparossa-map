@@ -15,7 +15,12 @@
   Keep public map data, short-lived traffic aggregates and private backups separate.
 - Preserve core relay/exit policy and privacy boundaries. Do not bypass a denied request
   through an implicit direct-origin fallback. Plaintext public content still needs provenance.
-- No host network changes, global installations, automatic downloads or background services.
-  Use synthetic fixtures for development, narrow checks and truthful integration status.
+- Do not change the development host's network or perform global installations, downloads
+  or service autostarts merely by opening or building this project. Host changes require
+  separate explicit authorization; use isolated, disposable environments for integration tests.
+- Develop the agreed, pre-authorized product downloads and shared background core service
+  without activating them on the development host. Preserve source pinning, licenses,
+  resource limits and privacy boundaries. Use synthetic fixtures where appropriate,
+  narrow checks and truthful integration status.
 - Do not claim Android/iOS support, live traffic rendering or rerouting from a desktop
   component test. Track these actual application paths until exercised.

@@ -1,5 +1,11 @@
 # DPS location integration boundary
 
+This **control-only diagnostic branch** stops after the empty-KVM metadata
+experiment, before all SDK acquisition and Android workloads. Its unchanged
+workflow still requires the explicit reviewed manual boolean. It cannot report a
+completed JNI/Android workload; the preceding full fixture is preserved in base
+`f3296c21f9787cb760e561954652158c7b21601d`.
+
 This document maps the shared VOLPAROSSA positioning service (DPS) to Organic
 Maps' pinned native location inputs. A separate Android native-quality fixture
 is now authored below; its source checks are not Android execution evidence or
@@ -1102,3 +1108,101 @@ predicate, parser bounds, receipt fields/retention, deadlines, cleanup, signals,
 KVM checks, baselines, workflow and JNI/Activity/controller sources are unchanged.
 The correction removes the known inherited permission at source. It does not
 establish the historical cause or prove final merged-APK or runtime success.
+
+
+### Isolated empty-VM metadata diagnostic candidate
+
+This separate diagnostic worktree is based on exact Map
+`f3296c21f9787cb760e561954652158c7b21601d`, tree
+`0002fa35860355a41541aa4563870909b03e7a5e`. The principal reports that actual
+`39694570310` on that source passed all eight Android instrumentation methods,
+including the zero-requested-permission Activity test, and emitted native-result,
+uninstall/stop and successful inner/outer group/state cleanup receipts. It still
+failed `KVM_DEVICE_CHANGED`: only KVM ctime/mtime changed, IPv6 matched and firewall
+comparison was counters-only. The retained artifact `12390187577` is 97,745 bytes,
+SHA-256 `e8a5320620919713895a5435e12826254719cb099cbe664fbb017459e1d0ac0e`.
+These are the principal's audited full-fixture facts, not execution of this
+control candidate. Earlier failed runs and their cause limits remain retained.
+
+The candidate calls only the original `kvm-probe` phase under its unchanged
+10-second outer command bound (8-second namespace timeout, then its existing
+1-second KILL escalation). It uses the existing root bootstrap to establish the
+verified private PID1/net/mount context, then permanently drops all UID/GID slots
+to the original nonroot caller, with only the unchanged device-derived KVM group
+supplementary and zero effective/permitted/ambient capabilities. The control
+rechecks the PID-namespace binding, PID1/proc identity, private network/only-lo,
+source, credentials and capability facts before device operations. No loopback
+activation or configuration writes are added. Direct inner public-build,
+offline-build and emulator entry requests are rejected before bootstrap.
+
+The fixed sequence is:
+
+1. Preserve the exact original KVM metadata as the before-snapshot and call the
+   byte-preserved `kvm_open_query`: open, verify device identity, require API12 and
+   close its system FD. No VM is created by that negative control.
+2. Wait one fixed 250ms window and take one snapshot. Require exact equality to
+   the before-snapshot; a difference or snapshot error stops before positive work.
+3. Open and verify the same device again. Issue exactly one
+   `KVM_CREATE_VM(0)` (`0xAE01`); retain only that returned VM FD, verify it is
+   non-inheritable, then close the VM FD followed by the system FD.
+4. Wait one further fixed 250ms window and take one snapshot. Record `UNCHANGED`,
+   `TIMESTAMPS_ONLY` or `CONFIGURATION_DIFFERENCE`; the timestamp classification
+   excludes exactly mtime/ctime solely for this diagnostic comparison. It never
+   changes a baseline or device-acceptance comparison.
+5. Recheck authority and retain the bounded observation. The ordinary phase still
+   requires exact original device equality. Even if that passes, the outer entry
+   raises `KVM_DIAGNOSTIC_ONLY_STOP`, with `completed_workload=false`, before any
+   acquisition. Any earlier failure also terminates; there is no retry/fallback.
+
+There are no vCPUs, guest memory slots, guest devices, `KVM_RUN`, additional fork,
+exec, FD duplication/transfer, event listeners, tracing or process scans in the
+control. The existing namespace launcher/owned-group cleanup remain the process
+containment mechanism. FD-producing calls use existing cancellation registration
+so returned FDs are assigned before a deferred interruption can raise. Both close
+attempts occur in `finally`; the first operation/close failure retains precedence
+and close flags remain false on failure. Cancellation during either fixed window
+also stops subsequent work. Existing catchable cleanup deadlines are unchanged.
+A blocked kernel operation, hard kill or runner destruction can prevent timely
+cleanup/receipts; namespace teardown alone proves neither explicit FD close nor
+VM destruction.
+
+`kvm-empty-vm-control.json` is source-bound and at most 16KiB in its actual saved
+JSON representation. It contains only fixed validated device/ACL-digest/group
+metadata, authority facts, the API12 negative result, close/creation flags, closed
+failure codes and diagnostic classifications. Arbitrary metadata keys, raw ACLs,
+errors, paths, PID values, event data and raw logs are excluded. Receipt failure
+cannot replace an existing operation/cancellation error. `completed_control` means
+only that the observation sequence finished; it grants no host-baseline or
+Android acceptance. The unchanged finalizer copies this fixed top-level JSON and
+retains the exact full baseline verdict before removing private state. Neither a
+new baseline nor timestamp normalization is introduced.
+
+Upstream provenance remains a research hypothesis: Linux v6.8 commit
+`e8f897f4afef0031fe618a8e94127a0934896aba`,
+[`virt/kvm/kvm_main.c`](https://github.com/torvalds/linux/blob/e8f897f4afef0031fe618a8e94127a0934896aba/virt/kvm/kvm_main.c)
+(SPDX GPL-2.0-only), emits KOBJ_CHANGE on VM creation/destruction. Systemd v255
+commit `db11bab38ccf1ed257f310d29070843d4c58ea01`,
+[`src/udev/udev-node.c`](https://github.com/systemd/systemd/blob/db11bab38ccf1ed257f310d29070843d4c58ea01/src/udev/udev-node.c)
+(SPDX GPL-2.0-or-later), updates reused-node timestamps. The
+[official KVM API](https://docs.kernel.org/virt/kvm/api.html#kvm-create-vm)
+describes an initially empty VM and FD-based lifetime. No upstream code is
+imported. Actual runner kernel/daemon source builds and the uevent/syscall chain
+are not bound by this experiment. Timestamp reproduction would not prove udev
+was the actor, rule out a transient restored mutation, explain an earlier run or
+authorize relaxing acceptance. A fixed 250ms window can miss delayed events;
+absence of a timestamp change is not disproof of the proposed mechanism.
+
+Nineteen new inert tests cover the single-create sequence and original query
+integration, exact metadata classifications without baseline normalization,
+negative-control rejection, open/fstat/ioctl/return/inheritability/close errors,
+FD registration cancellation and both observation windows, guard isolation,
+source/privacy/size checks, receipt-failure precedence and closed entry/source
+contracts. The inventory is **93 existing + 19 = 112**. Of the 93 existing test
+methods, 92 retain identical ASTs; the outer-orchestration test necessarily now
+requires the probe-only stop and `completed_workload=false`. Original core/JNI,
+Android eight-method inventory/acceptance guard, lifecycle/cancellation/reaping,
+firewall and baseline code remain unchanged. Run the source gate, focused
+`test_prepare.EmptyVmControlTests`, and whole inert suite as documented above.
+No local KVM, namespace, signal, credential, native, SDK or Android runtime is
+executed by these tests. The actual hosted empty-VM control remains **unrun**;
+independent review and a separately authorized hosted trial are still required.

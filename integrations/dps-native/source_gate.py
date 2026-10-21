@@ -28,6 +28,37 @@ def manifest_boundary(source, module):
             require(activity.get(ns + "exported") == "false", "NONEXPORTED_FIXTURE")
 
 
+def kvm_diagnostic_boundary(parsed):
+    """Only the fixed, pre-acquisition diagnostic helper can create one empty VM."""
+    functions = {node.name: node for node in parsed.body if isinstance(node, ast.FunctionDef)}
+    expected = {"kvm_open_query": "fcntl.ioctl(fd, KVM_GET_API_VERSION, 0)",
+                "kvm_empty_vm_control": "fcntl.ioctl(system_fd, KVM_CREATE_VM, 0)"}
+    calls = []
+    for name, function in functions.items():
+        for node in ast.walk(function):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "ioctl":
+                require(name in expected and ast.dump(node) == ast.dump(ast.parse(expected[name], mode="eval").body),
+                        "KVM_DIAGNOSTIC_IOCTL_ONLY")
+                calls.append(name)
+    require(sorted(calls) == sorted(expected) and sum(isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute) and node.func.attr == "ioctl" for node in ast.walk(parsed)) == 2,
+            "KVM_DIAGNOSTIC_IOCTL_INVENTORY")
+    main = functions["main"]
+    workload = {"acquire_build", "offline_build", "emulator_trial", "cancellation_control", "group_reaping_control"}
+    main_calls = [node for node in ast.walk(main) if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)]
+    require(not any(node.func.id in workload for node in main_calls), "KVM_DIAGNOSTIC_NO_WORKLOAD")
+    phase_calls = [node for node in main_calls if node.func.id == "run_phase"]
+    require(len(phase_calls) == 1 and ast.dump(phase_calls[0]) == ast.dump(
+            ast.parse('run_phase(state, "kvm-probe", env, 10)', mode="eval").body), "KVM_DIAGNOSTIC_PHASE_BOUND")
+    tries = [node for node in main.body if isinstance(node, ast.Try)]
+    require(len(tries) == 1 and isinstance(tries[0].body[-1], ast.Raise)
+            and ast.dump(tries[0].body[-1]) == ast.dump(ast.parse('raise KvmFailure("KVM_DIAGNOSTIC_ONLY_STOP")').body[0]),
+            "KVM_DIAGNOSTIC_STOP_REQUIRED")
+    require(not any(isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "complete"
+            for target in node.targets) and isinstance(node.value, ast.Constant) and node.value.value is True
+            for node in ast.walk(main)), "KVM_DIAGNOSTIC_WORKLOAD_INCOMPLETE")
+
+
 def main():
     locked = pins()
     upstream = json.loads((HERE.parents[1] / "upstream.lock.json").read_text())
@@ -60,14 +91,14 @@ def main():
     parsed = ast.parse(hosted)
     constants = {node.targets[0].id: ast.literal_eval(node.value) for node in parsed.body
                  if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
-                 and node.targets[0].id in ("PHASES", "KVM_PHASES", "KVM_GET_API_VERSION")}
+                 and node.targets[0].id in ("PHASES", "KVM_PHASES", "KVM_GET_API_VERSION", "KVM_CREATE_VM")}
     require(constants == dict(PHASES=("kvm-probe", "public-build", "offline-build", "emulator"),
-                KVM_PHASES=("kvm-probe", "emulator"), KVM_GET_API_VERSION=0xAE00), "KVM_PHASE_ALLOWLIST")
+                KVM_PHASES=("kvm-probe", "emulator"), KVM_GET_API_VERSION=0xAE00, KVM_CREATE_VM=0xAE01), "KVM_PHASE_ALLOWLIST")
     for node in ast.walk(parsed):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
             require(node.func.attr not in ("chmod", "chown", "setxattr", "removexattr", "initgroups"), "NO_KVM_HOST_MUTATION")
-    require("PREEXISTING_KVM_ACCESS_REQUIRED" not in hosted and "KVM_CREATE_VM" not in hosted,
-            "KVM_QUERY_ONLY")
+    require("PREEXISTING_KVM_ACCESS_REQUIRED" not in hosted, "NO_PREEXISTING_ACCESS_ASSUMPTION")
+    kvm_diagnostic_boundary(parsed)
     workflow = (HERE.parents[1] / ".github/workflows/dps-native.yml").read_text()
     require("run: exec python3 -B integrations/dps-native/hosted.py --reviewed-hosted-fixture" in workflow,
             "DIRECT_SIGNAL_ENTRY")

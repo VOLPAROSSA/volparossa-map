@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Inert Python/Git/archive tests only; none executes Rust/JNI/Android or a controller."""
 import copy
+import ast
 import errno
 from types import SimpleNamespace
 import json
@@ -1354,6 +1355,270 @@ class EmulatorObservationTests(unittest.TestCase):
         self.assertFalse((evidence / "emulator.private.log").exists()); self.assertFalse((evidence / "adb.private.log").exists())
 
 
+class EmptyVmControlTests(unittest.TestCase):
+    """Inert device/namespace/credentials/ioctl/clock shims; no KVM is opened."""
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.life = H.Lifetime(); self.life.private_pid1 = True
+        self.enterContext(patch.object(H, "ACTIVE", self.life))
+        self.enterContext(patch.object(H.signal, "setitimer"))
+        self.enterContext(patch.object(H.signal, "getitimer", return_value=(0.0, 0.0)))
+        self.enterContext(patch.dict(H.os.environ, {"GITHUB_SHA": "a" * 40}))
+        self.enterContext(patch.object(H.os, "getuid", return_value=1001))
+        self.enterContext(patch.object(H.os, "geteuid", return_value=1001))
+        self.enterContext(patch.object(H.os, "getpid", return_value=1))
+        self.links = self.enterContext(patch.object(H.socket, "if_nameindex", return_value=[(1, "lo")]))
+        self.readlink = self.enterContext(patch.object(H.os, "readlink", side_effect=lambda p: {
+            "/proc/self/ns/pid": "pid:[2]", "/proc/self": "1", "/proc/self/ns/net": "net:[2]"}[p]))
+        self.creds = dict(uid=[1001]*3, gid=[1001]*3, groups=[78])
+        self.credentials = self.enterContext(patch.object(H, "credentials", return_value=self.creds))
+        self.caps = self.enterContext(patch.object(H, "capability_bits", return_value=dict(CapEff=0, CapPrm=0, CapAmb=0)))
+        self.info = SimpleNamespace(st_dev=1, st_ino=2, st_rdev=H.os.makedev(10, 232),
+            st_mode=stat.S_IFCHR | 0o660, st_uid=0, st_gid=78, st_nlink=1, st_mtime_ns=3, st_ctime_ns=4)
+        self.expected = dict(device=H.device_identity(self.info), acl=dict(present=False), kvm_gid=78)
+        self.snap = self.enterContext(patch.object(H, "kvm_snapshot", return_value=self.expected))
+        self.original_query = H.kvm_open_query
+        self.query = self.enterContext(patch.object(H, "kvm_open_query", return_value=dict(api_version=12, fd_closed=True, vm_created=False)))
+        self.opened = self.enterContext(patch.object(H.os, "open", return_value=20))
+        self.fstat = self.enterContext(patch.object(H.os, "fstat", return_value=self.info))
+        self.ioctl = self.enterContext(patch.object(H.fcntl, "ioctl", return_value=21))
+        self.inheritable = self.enterContext(patch.object(H.os, "get_inheritable", return_value=False))
+        self.closed = self.enterContext(patch.object(H.os, "close"))
+        self.sleep = self.enterContext(patch.object(H.time, "sleep"))
+
+    def control(self, **kwargs):
+        values = dict(state=self.root, source="a" * 40, expected=self.expected, parent_pidns="pid:[1]", outer_netns="net:[1]")
+        values.update(kwargs)
+        return H.kvm_empty_vm_control(**values)
+
+    def receipt(self):
+        raw = (self.root / "kvm-empty-vm-control.json").read_bytes()
+        self.assertLessEqual(len(raw), 16384)
+        for secret in (b"PRIVATE_SECRET", b"PRIVATE_OPEN", b"PRIVATE_IOCTL", b"PRIVATE_CLOSE", b"PRIVATE_ORIGINAL",
+                       b"PRIVATE_SAVE", b"PRIVATE_IF", b"PRIVATE_SOURCE", b"PRIVATE_SNAPSHOT"):
+            self.assertNotIn(secret, raw)
+        return json.loads(raw)
+
+    def test_one_empty_create_and_close_has_fixed_order_flags_and_no_workload_acceptance(self):
+        events = []
+        self.query.side_effect = lambda value: events.append("query") or dict(api_version=12, fd_closed=True, vm_created=False)
+        self.sleep.side_effect = lambda seconds: events.append(("window", seconds))
+        self.opened.side_effect = lambda *args: events.append("open") or 20
+        self.ioctl.side_effect = lambda *args: events.append(("ioctl", args)) or 21
+        self.closed.side_effect = lambda fd: events.append(("close", fd))
+        result = self.control()
+        self.assertEqual(events, ["query", ("window", .25), "open", ("ioctl", (20, H.KVM_CREATE_VM, 0)),
+            ("close", 21), ("close", 20), ("window", .25)])
+        self.opened.assert_called_once_with(H.KVM, H.os.O_RDWR | H.os.O_CLOEXEC | H.os.O_NOFOLLOW)
+        self.inheritable.assert_called_once_with(21)
+        self.assertTrue(result["completed_control"]); self.assertTrue(result["query_unchanged"])
+        self.assertEqual(result["metadata_outcome"], "UNCHANGED")
+        self.assertFalse(result["completed_workload"]); self.assertFalse(result["android_executed"])
+        self.assertEqual(self.receipt(), result)
+
+    def test_timestamp_only_and_each_identity_acl_group_difference_are_distinct(self):
+        for key in ("mtime_ns", "ctime_ns", "mode", "uid", "ino", "dev", "nlink", "acl"):
+            changed = copy.deepcopy(self.expected)
+            if key == "acl": changed["acl"] = dict(present=True, bytes=1, sha256="b" * 64)
+            else: changed["device"][key] += 1
+            self.snap.side_effect = [self.expected, changed]
+            result = self.control()
+            self.assertEqual(result["metadata_outcome"], "TIMESTAMPS_ONLY" if key in ("mtime_ns", "ctime_ns") else "CONFIGURATION_DIFFERENCE")
+            self.assertTrue(result["completed_control"])
+            self.assertNotEqual(result["before"], result["after_vm"])
+            # Classification never grants equality, including for timestamp-only changes.
+            self.assertFalse(H.baseline_unchanged(dict(kvm=self.expected), dict(kvm=changed)))
+
+    def test_original_query_fd_is_closed_before_the_single_positive_vm_creation(self):
+        self.opened.side_effect = [10, 20]
+        self.ioctl.side_effect = [12, 21]
+        with patch.object(H, "kvm_open_query", self.original_query):
+            result = self.control()
+        self.assertTrue(result["completed_control"])
+        self.assertEqual(self.ioctl.call_args_list, [unittest.mock.call(10, H.KVM_GET_API_VERSION, 0),
+            unittest.mock.call(20, H.KVM_CREATE_VM, 0)])
+        self.assertEqual(self.closed.call_args_list, [unittest.mock.call(10), unittest.mock.call(21), unittest.mock.call(20)])
+        self.assertEqual(result["query"], dict(api_version=12, fd_closed=True, vm_created=False))
+
+    def test_query_contract_requires_api12_closed_fd_and_no_vm_before_first_window(self):
+        for key, value in (("api_version", 11), ("fd_closed", False), ("vm_created", True)):
+            probe = dict(api_version=12, fd_closed=True, vm_created=False); probe[key] = value
+            self.query.return_value = probe
+            with self.assertRaisesRegex(ValueError, "KVM_CONTROL_QUERY_REQUIRED"): self.control()
+            self.assertFalse(self.receipt()["completed_control"])
+        self.sleep.assert_not_called(); self.opened.assert_not_called(); self.ioctl.assert_not_called()
+
+    def test_cancellation_in_each_fixed_window_stops_without_further_vm_work(self):
+        for target in (1, 2):
+            self.life.first_signal = None; self.life.stop = None
+            self.closed.reset_mock(); self.opened.reset_mock(); self.ioctl.reset_mock()
+            windows = []
+            def window(seconds):
+                windows.append(seconds)
+                if len(windows) == target: self.life.first_signal = H.signal.SIGTERM
+            self.sleep.side_effect = window
+            with self.assertRaises(H.Interrupted): self.control()
+            result = self.receipt(); self.assertEqual(result["primary_failure"], "HOSTED_INTERRUPTED")
+            self.assertFalse(result["completed_control"]); self.assertEqual(windows, [.25] * target)
+            if target == 1:
+                self.opened.assert_not_called(); self.ioctl.assert_not_called(); self.closed.assert_not_called()
+            else:
+                self.ioctl.assert_called_once_with(20, H.KVM_CREATE_VM, 0)
+                self.assertEqual(self.closed.call_args_list, [unittest.mock.call(21), unittest.mock.call(20)])
+                self.assertTrue(result["vm_fd_closed"] and result["system_fd_closed"])
+
+    def test_changed_query_window_stops_before_any_vm_open(self):
+        changed = copy.deepcopy(self.expected); changed["device"]["mtime_ns"] += 1
+        self.snap.return_value = changed
+        with self.assertRaisesRegex(ValueError, "KVM_CONTROL_QUERY_CHANGED"): self.control()
+        self.query.assert_called_once_with(self.expected); self.sleep.assert_called_once_with(.25)
+        self.opened.assert_not_called(); self.ioctl.assert_not_called(); self.closed.assert_not_called()
+        result = self.receipt(); self.assertFalse(result["completed_control"]); self.assertFalse(result["query_unchanged"])
+        self.assertIsNone(result["after_vm"])
+
+    def test_query_failure_never_opens_or_creates_vm_and_retains_closed_failure(self):
+        for error, code in ((H.KvmFailure("KVM_OPEN_DENIED"), "KVM_OPEN_DENIED"),
+            (H.KvmFailure("KVM_API_UNAVAILABLE"), "KVM_API_UNAVAILABLE"),
+            (H.KvmFailure("KVM_API_VERSION_UNSUPPORTED"), "KVM_API_VERSION_UNSUPPORTED"),
+            (ValueError("PRIVATE_SECRET"), "CONTROL_ERROR")):
+            self.query.side_effect = error
+            with self.assertRaises(type(error)): self.control()
+            self.assertEqual(self.receipt()["primary_failure"], code)
+        self.sleep.assert_not_called(); self.opened.assert_not_called(); self.ioctl.assert_not_called()
+
+    def test_positive_open_or_fstat_failure_prevents_create_and_closes_only_owned_fd(self):
+        self.opened.side_effect = OSError(errno.EACCES, "PRIVATE_OPEN")
+        with self.assertRaises(OSError): self.control()
+        self.ioctl.assert_not_called(); self.closed.assert_not_called()
+        self.assertEqual(self.receipt()["primary_failure"], "OS_ERROR")
+        self.opened.side_effect = None
+        wrong = SimpleNamespace(**vars(self.info)); wrong.st_ino += 1; self.fstat.return_value = wrong
+        with self.assertRaisesRegex(ValueError, "KVM_DEVICE_CHANGED"): self.control()
+        self.ioctl.assert_not_called(); self.closed.assert_called_once_with(20)
+        self.assertTrue(self.receipt()["system_fd_closed"])
+
+    def test_ioctl_failure_and_invalid_return_never_run_or_retry_and_close_system(self):
+        for outcome in (OSError(errno.ENOMEM, "PRIVATE_IOCTL"), -1, True, 20):
+            self.ioctl.reset_mock(); self.closed.reset_mock(); self.sleep.reset_mock()
+            self.ioctl.side_effect = outcome if isinstance(outcome, BaseException) else None
+            self.ioctl.return_value = outcome
+            with self.assertRaises((OSError, ValueError)): self.control()
+            self.ioctl.assert_called_once_with(20, H.KVM_CREATE_VM, 0)
+            self.closed.assert_called_once_with(20); self.sleep.assert_called_once_with(.25)
+            self.assertFalse(self.receipt()["vm_created"])
+
+    def test_inheritable_fd_fails_and_both_owned_descriptors_are_closed(self):
+        self.inheritable.return_value = True
+        with self.assertRaisesRegex(ValueError, "KVM_CONTROL_VM_FD_INHERITABLE"): self.control()
+        self.assertEqual(self.closed.call_args_list, [unittest.mock.call(21), unittest.mock.call(20)])
+        result = self.receipt(); self.assertTrue(result["vm_created"]); self.assertFalse(result["completed_control"])
+        self.assertTrue(result["vm_fd_closed"] and result["system_fd_closed"])
+
+    def test_each_close_failure_attempts_other_close_and_never_claims_completed(self):
+        for target in (20, 21):
+            self.closed.reset_mock(); self.sleep.reset_mock()
+            self.closed.side_effect = lambda fd: (_ for _ in ()).throw(OSError(errno.EIO, "PRIVATE_CLOSE")) if fd == target else None
+            with self.assertRaises(OSError): self.control()
+            self.assertEqual(self.closed.call_args_list, [unittest.mock.call(21), unittest.mock.call(20)])
+            result = self.receipt(); self.assertFalse(result["completed_control"])
+            self.assertFalse(result["vm_fd_closed"] if target == 21 else result["system_fd_closed"])
+            self.sleep.assert_called_once_with(.25)
+
+    def test_original_ioctl_error_wins_over_both_close_and_receipt_failure(self):
+        original = OSError(errno.EINVAL, "PRIVATE_ORIGINAL")
+        self.ioctl.side_effect = original; self.closed.side_effect = OSError(errno.EIO, "PRIVATE_CLOSE")
+        with patch.object(H, "save", side_effect=OSError("PRIVATE_SAVE")):
+            with self.assertRaises(OSError) as raised: self.control()
+        self.assertIs(raised.exception, original)
+        self.assertEqual(self.life.cleanup_errors, ["KVM_CONTROL_RECEIPT_FAILED"])
+        self.closed.assert_called_once_with(20)
+
+    def test_deferred_cancellation_after_each_fd_producing_call_keeps_fd_ownership(self):
+        for stage in ("open", "ioctl"):
+            self.life.first_signal = None; self.life.stop = None
+            self.opened.side_effect = None; self.ioctl.side_effect = None
+            self.closed.reset_mock(); self.sleep.reset_mock()
+            def cancel(*_):
+                self.assertTrue(self.life.spawning)
+                self.life.first_signal = H.signal.SIGTERM
+                return 20 if stage == "open" else 21
+            if stage == "open": self.opened.side_effect = cancel
+            else: self.ioctl.side_effect = cancel
+            with self.assertRaises(H.Interrupted): self.control()
+            expected = [unittest.mock.call(20)] if stage == "open" else [unittest.mock.call(21), unittest.mock.call(20)]
+            self.assertEqual(self.closed.call_args_list, expected)
+            result = self.receipt(); self.assertEqual(result["primary_failure"], "HOSTED_INTERRUPTED")
+            self.assertFalse(result["completed_control"]); self.assertTrue(result["system_fd_closed"])
+            self.assertEqual(result["vm_created"], stage == "ioctl")
+
+    def test_guard_failures_prevent_query_open_and_ioctl_and_do_not_leak_metadata(self):
+        cases = (("uid", patch.object(H.os, "getuid", return_value=0)),
+            ("pid", patch.object(H.os, "getpid", return_value=2)),
+            ("mode", patch.object(self.life, "private_pid1", False)),
+            ("caps", patch.object(H, "capability_bits", return_value=dict(CapEff=1, CapPrm=0, CapAmb=0))),
+            ("groups", patch.object(H, "credentials", return_value=dict(uid=[1001]*3, gid=[1001]*3, groups=[0,78]))),
+            ("net", patch.object(H.socket, "if_nameindex", return_value=[(1,"lo"),(2,"PRIVATE_IF")])) )
+        for name, context in cases:
+            with self.subTest(name=name), context:
+                with self.assertRaises(ValueError): self.control()
+        self.query.assert_not_called(); self.opened.assert_not_called(); self.ioctl.assert_not_called()
+        self.assertFalse(self.receipt()["completed_control"])
+        for kwargs in (dict(source="PRIVATE_SOURCE"), dict(source="b"*40)):
+            with patch.object(H, "save") as saved:
+                with self.assertRaisesRegex(ValueError, "KVM_CONTROL_SOURCE"): self.control(**kwargs)
+                saved.assert_not_called()
+
+    def test_metadata_unknown_fields_bounds_and_source_are_closed(self):
+        mutations = []
+        for path, value in (((), "PRIVATE"), (("acl",), dict(present=True, bytes=5000, sha256="b"*64)),
+            (("device","mtime_ns"), 2**64), (("device","ino"), True), (("kvm_gid",), 0)):
+            item = copy.deepcopy(self.expected)
+            if not path: item["PRIVATE"] = value
+            elif len(path) == 1: item[path[0]] = value
+            else: item[path[0]][path[1]] = value
+            mutations.append(item)
+        for item in mutations:
+            with self.assertRaisesRegex(ValueError, "KVM_CONTROL_METADATA"): self.control(expected=item)
+            self.assertEqual(self.receipt()["source"], "a" * 40)
+        self.query.assert_not_called(); self.opened.assert_not_called()
+
+    def test_second_window_snapshot_or_authority_failure_cannot_complete_control(self):
+        self.snap.side_effect = [self.expected, OSError(errno.EIO, "PRIVATE_SNAPSHOT")]
+        with self.assertRaises(OSError): self.control()
+        result = self.receipt(); self.assertTrue(result["vm_fd_closed"] and result["system_fd_closed"])
+        self.assertIsNone(result["after_vm"]); self.assertFalse(result["completed_control"])
+        self.snap.side_effect = None; self.credentials.side_effect = [self.creds, dict(uid=[1002]*3,gid=[1001]*3,groups=[78])]
+        with self.assertRaisesRegex(ValueError, "KVM_CONTROL_AUTHORITY_CHANGED"): self.control()
+        self.assertFalse(self.receipt()["completed_control"])
+
+    def test_receipt_byte_bound_and_write_failure_are_not_reported_as_completed_workload(self):
+        with patch.object(H.json, "dumps", return_value="x" * 16385), patch.object(H, "save") as saved:
+            with self.assertRaisesRegex(ValueError, "KVM_CONTROL_RECEIPT_BOUND"): self.control()
+            saved.assert_not_called()
+        with patch.object(H, "save", side_effect=OSError("PRIVATE_SAVE")):
+            with self.assertRaises(OSError): self.control()
+        self.assertEqual(self.life.cleanup_errors, ["KVM_CONTROL_RECEIPT_FAILED"] * 2)
+
+    def test_entry_rejects_other_workload_phases_before_bootstrap(self):
+        for phase in ("public-build", "offline-build", "emulator"):
+            with patch.object(H.sys, "argv", ["hosted.py", "--inside-" + phase, str(self.root)]), patch.object(H, "phase_child") as child:
+                with self.assertRaisesRegex(ValueError, "KVM_DIAGNOSTIC_PHASE_ONLY"): H.main()
+                child.assert_not_called()
+
+    def test_source_gate_rejects_extra_or_changed_ioctls_workload_or_false_completion(self):
+        source = (P.HERE / "hosted.py").read_text()
+        S.kvm_diagnostic_boundary(ast.parse(source))
+        mutations = (source.replace("fcntl.ioctl(system_fd, KVM_CREATE_VM, 0)", "fcntl.ioctl(system_fd, KVM_CREATE_VM, 1)"),
+            source.replace("fcntl.ioctl(system_fd, KVM_CREATE_VM, 0)", "fcntl.ioctl(system_fd, KVM_RUN, 0)"),
+            source.replace('raise KvmFailure("KVM_DIAGNOSTIC_ONLY_STOP")', 'acquire_build(state, env)'),
+            source.replace('raise KvmFailure("KVM_DIAGNOSTIC_ONLY_STOP")', 'complete = True'),
+            source.replace('run_phase(state, "kvm-probe", env, 10)', 'run_phase(state, "public-build", env, 10)'),
+            source + '\ndef extra():\n    fcntl.ioctl(fd, KVM_CREATE_VM, 0)\n')
+        for mutated in mutations:
+            with self.assertRaises(ValueError): S.kvm_diagnostic_boundary(ast.parse(mutated))
+
+
 class KvmShimTests(unittest.TestCase):
     """No local KVM device, ioctl, credentials, namespace, signal or workload execution."""
     def setUp(self):
@@ -1630,9 +1895,10 @@ class KvmShimTests(unittest.TestCase):
              patch.object(H, "cancellation_control", side_effect=lambda *_: observed.append("cancellation")), \
              patch.object(H, "group_reaping_control", side_effect=lambda *_: observed.append("group-reaping")), \
              patch.object(H, "acquire_build") as build, patch.object(H, "finalize") as finalizer:
-            H.main()
+            with self.assertRaisesRegex(H.KvmFailure, "KVM_DIAGNOSTIC_ONLY_STOP"): H.main()
             build.assert_not_called(); finalizer.assert_called_once()
-        self.assertEqual(observed, ["kvm-probe", "cancellation", "group-reaping", "public-build", "offline-build", "emulator"])
+            self.assertIs(finalizer.call_args.args[3], False)
+        self.assertEqual(observed, ["kvm-probe"])
 
 
 if __name__ == "__main__":

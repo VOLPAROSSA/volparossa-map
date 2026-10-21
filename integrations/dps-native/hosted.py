@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Guarded, manual public hosted synthetic JNI proof candidate. Never a host installer.
 
-Public source/dependency acquisition precedes an offline rebuild and installed
-API36/x86_64 test in a disposable network/PID/mount namespace. Only namespace
-loopback is activated. No core daemon, network participation or sensor trial.
+This diagnostic-only branch runs the fixed empty-VM metadata control and stops
+before any acquisition or Android workload. Original JNI helpers remain present;
+they are not called by this branch's entrypoint. No host configuration changes.
 """
 import json
 import errno
@@ -30,6 +30,7 @@ PACKAGE = "org.volparossa.map.dps.test"
 RUNNER = PACKAGE + "/androidx.test.runner.AndroidJUnitRunner"
 KVM = Path("/dev/kvm")
 KVM_GET_API_VERSION = 0xAE00  # Linux UAPI _IO(KVMIO, 0x00), system query only.
+KVM_CREATE_VM = 0xAE01  # Diagnostic control only: one empty type-0 VM, never run.
 PHASES = ("kvm-probe", "public-build", "offline-build", "emulator")
 KVM_PHASES = ("kvm-probe", "emulator")
 
@@ -207,6 +208,126 @@ def kvm_open_query(expected):
                     raise
     require(result["fd_closed"] and kvm_snapshot() == expected, "KVM_DEVICE_CHANGED")
     return result
+
+
+def kvm_control_metadata(value):
+    """Fixed metadata only; no raw errors, ACL bytes, paths or arbitrary fields."""
+    require(type(value) is dict and set(value) == {"device", "acl", "kvm_gid"}, "KVM_CONTROL_METADATA")
+    device = value["device"]
+    require(type(device) is dict and set(device) == {"dev", "ino", "rdev", "mode", "uid", "gid", "nlink", "mtime_ns", "ctime_ns"}
+            and all(type(item) is int and -2**63 <= item < 2**64 for item in device.values()), "KVM_CONTROL_METADATA")
+    require(type(value["kvm_gid"]) is int and 0 < value["kvm_gid"] < 2**32
+            and value["kvm_gid"] == device["gid"] and stat.S_ISCHR(device["mode"])
+            and (os.major(device["rdev"]), os.minor(device["rdev"])) == (10, 232), "KVM_CONTROL_METADATA")
+    acl = value["acl"]
+    require(type(acl) is dict and ((set(acl) == {"present"} and acl["present"] is False) or
+            (set(acl) == {"present", "bytes", "sha256"} and acl["present"] is True
+             and type(acl["bytes"]) is int and 0 <= acl["bytes"] <= 4096
+             and type(acl["sha256"]) is str and re.fullmatch("[0-9a-f]{64}", acl["sha256"]))), "KVM_CONTROL_METADATA")
+    return dict(device=dict(device), acl=dict(acl), kvm_gid=value["kvm_gid"])
+
+
+def kvm_control_failure(error):
+    if isinstance(error, Interrupted): return "HOSTED_INTERRUPTED"
+    if isinstance(error, CleanupDeadline): return "CLEANUP_DEADLINE"
+    if isinstance(error, OSError): return "OS_ERROR"
+    known = {"KVM_CONTROL_PRIVATE_PID1", "PRIVATE_PIDNS_BINDING", "PRIVATE_PID1_REQUIRED",
+        "KVM_CONTROL_PRIVATE_NETWORK", "KVM_CONTROL_UNPRIVILEGED", "KVM_CONTROL_METADATA",
+        "KVM_CONTROL_CREDENTIALS", "KVM_CONTROL_CAPABILITIES", "KVM_CONTROL_QUERY_REQUIRED",
+        "KVM_CONTROL_QUERY_CHANGED", "KVM_DEVICE_CHANGED", "KVM_CONTROL_VM_FD",
+        "KVM_CONTROL_VM_FD_INHERITABLE", "KVM_CONTROL_CLOSE_FAILED", "KVM_CONTROL_AUTHORITY_CHANGED",
+        "KVM_CONTROL_CLOSE_UNCONFIRMED", "KVM_PROBE_UNPRIVILEGED", "KVM_OPEN_DENIED", "KVM_OPEN_FAILED",
+        "KVM_API_UNAVAILABLE", "KVM_API_VERSION_UNSUPPORTED", "KVM_MISSING", "KVM_STAT_FAILED",
+        "KVM_WRONG_TYPE", "KVM_WRONG_DEVICE", "KVM_GROUP_MISSING", "KVM_GROUP_MISMATCH",
+        "KVM_ACL_BOUND", "KVM_ACL_UNREADABLE"}
+    value = error.args[0] if isinstance(error, ValueError) and error.args else None
+    return value if type(value) is str and value in known else "CONTROL_ERROR"
+
+
+def kvm_empty_vm_control(state, source, expected, parent_pidns, outer_netns):
+    """Diagnostic-only controlled creation; never changes the baseline verdict."""
+    require(type(source) is str and re.fullmatch("[0-9a-f]{40}", source)
+            and os.environ.get("GITHUB_SHA") == source, "KVM_CONTROL_SOURCE")
+    result = dict(schema=1, kind="empty-kvm-vm-control", source=source, completed_control=False,
+        completed_workload=False, android_executed=False, before=None, after_query=None, after_vm=None,
+        query_unchanged=None, metadata_outcome="NOT_OBSERVED", credentials=None, capabilities=None,
+        query=None, vm_created=False, vm_fd_closed=False, system_fd_closed=False,
+        primary_failure=None, close_errors=[])
+    original = None
+    try:
+        require(ACTIVE.private_pid1 is True, "KVM_CONTROL_PRIVATE_PID1")
+        private_pid1_identity(parent_pidns)
+        require(type(outer_netns) is str and re.fullmatch(r"net:\[[1-9][0-9]{0,19}\]", outer_netns)
+                and os.readlink("/proc/self/ns/net") != outer_netns
+                and sorted(n for _, n in socket.if_nameindex()) == ["lo"], "KVM_CONTROL_PRIVATE_NETWORK")
+        require(os.getuid() == os.geteuid() != 0, "KVM_CONTROL_UNPRIVILEGED")
+        result["before"] = kvm_control_metadata(expected)
+        creds, caps = credentials(), capability_bits()
+        require(creds["uid"] == [os.getuid()] * 3 and len(creds["gid"]) == 3
+                and type(creds["gid"][0]) is int and creds["gid"][0] > 0
+                and creds["gid"] == [creds["gid"][0]] * 3 and creds["gid"][0] != expected["kvm_gid"]
+                and creds["groups"] == [expected["kvm_gid"]], "KVM_CONTROL_CREDENTIALS")
+        require(caps == dict(CapEff=0, CapPrm=0, CapAmb=0), "KVM_CONTROL_CAPABILITIES")
+        result.update(credentials=creds, capabilities=caps)
+        probe = kvm_open_query(expected)
+        require(probe == dict(api_version=12, fd_closed=True, vm_created=False), "KVM_CONTROL_QUERY_REQUIRED")
+        result["query"] = dict(api_version=12, fd_closed=True, vm_created=False)
+        ACTIVE.check(); time.sleep(0.25); ACTIVE.check()
+        result["after_query"] = kvm_control_metadata(kvm_snapshot())
+        result["query_unchanged"] = result["before"] == result["after_query"]
+        require(result["query_unchanged"], "KVM_CONTROL_QUERY_CHANGED")
+        system_fd, vm_fd, operation_error, close_error = None, None, None, None
+        try:
+            with ACTIVE.registration():
+                system_fd = os.open(KVM, os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW)
+            require(device_identity(os.fstat(system_fd)) == expected["device"], "KVM_DEVICE_CHANGED")
+            with ACTIVE.registration():
+                candidate = fcntl.ioctl(system_fd, KVM_CREATE_VM, 0)
+                require(type(candidate) is int and candidate >= 0 and candidate != system_fd, "KVM_CONTROL_VM_FD")
+                vm_fd = candidate
+                result["vm_created"] = True
+            require(not os.get_inheritable(vm_fd), "KVM_CONTROL_VM_FD_INHERITABLE")
+        except BaseException as error:
+            operation_error = error
+            raise
+        finally:
+            for fd, flag, code in ((vm_fd, "vm_fd_closed", "VM_FD_CLOSE"),
+                                   (system_fd, "system_fd_closed", "SYSTEM_FD_CLOSE")):
+                if fd is None: continue
+                try:
+                    with ACTIVE.cleanup():
+                        os.close(fd); result[flag] = True
+                except BaseException as error:
+                    result["close_errors"].append(code)
+                    if close_error is None: close_error = error
+            if operation_error is None and close_error is not None:
+                raise close_error
+        ACTIVE.check(); time.sleep(0.25); ACTIVE.check()
+        result["after_vm"] = kvm_control_metadata(kvm_snapshot())
+        before, after = result["before"], result["after_vm"]
+        if before == after:
+            result["metadata_outcome"] = "UNCHANGED"
+        else:
+            invariant = lambda value: dict(acl=value["acl"], kvm_gid=value["kvm_gid"],
+                device={key: item for key, item in value["device"].items() if key not in ("mtime_ns", "ctime_ns")})
+            result["metadata_outcome"] = "TIMESTAMPS_ONLY" if invariant(before) == invariant(after) else "CONFIGURATION_DIFFERENCE"
+        require(credentials() == creds and capability_bits() == caps, "KVM_CONTROL_AUTHORITY_CHANGED")
+        require(result["vm_created"] and result["vm_fd_closed"] and result["system_fd_closed"], "KVM_CONTROL_CLOSE_UNCONFIRMED")
+        result["completed_control"] = True
+        return result
+    except BaseException as error:
+        original = error
+        result["primary_failure"] = kvm_control_failure(error)
+        raise
+    finally:
+        try:
+            with ACTIVE.cleanup():
+                require(len((json.dumps(result, indent=2, sort_keys=True) + "\n").encode()) <= 16384,
+                        "KVM_CONTROL_RECEIPT_BOUND")
+                save(state / "kvm-empty-vm-control.json", result)
+        except BaseException:
+            ACTIVE.cleanup_errors.append("KVM_CONTROL_RECEIPT_FAILED")
+            if original is None: raise
 
 
 def children(pid):
@@ -1223,7 +1344,10 @@ def phase_child(state, phase):
         require(env["GITHUB_SHA"] == source, "PHASE_SOURCE")
         guards(env)
         activate_environment(env)
-        if phase in KVM_PHASES:
+        if phase == "kvm-probe":
+            control = kvm_empty_vm_control(state, source, expected, source_document.get("parent_pidns"), outer["netns"])
+            result["probe"] = control["query"]
+        elif phase in KVM_PHASES:
             result["probe"] = kvm_open_query(expected)
         if phase == "public-build":
             acquire_build(state, env)
@@ -1764,7 +1888,8 @@ def main():
     if len(sys.argv) == 3 and sys.argv[1] == "--inside-reaping-control":
         inside_reaping_control(Path(sys.argv[2])); return
     if len(sys.argv) == 3 and sys.argv[1] in tuple("--inside-" + phase for phase in PHASES):
-        phase_child(Path(sys.argv[2]), sys.argv[1].removeprefix("--inside-")); return
+        require(sys.argv[1] == "--inside-kvm-probe", "KVM_DIAGNOSTIC_PHASE_ONLY")
+        phase_child(Path(sys.argv[2]), "kvm-probe"); return
     if len(sys.argv) == 5 and sys.argv[1] == "--cancellation-child":
         cancellation_child(Path(sys.argv[2]), Path(sys.argv[3]), sys.argv[4]); return
     require(sys.argv[1:] == ["--reviewed-hosted-fixture"], "NO_ARBITRARY_COMMAND")
@@ -1786,13 +1911,7 @@ def main():
             (state / directory).mkdir(mode=0o700)
         save(state / "environment.json", env)
         run_phase(state, "kvm-probe", env, 10)  # Before any SDK acquisition/build.
-        cancellation_control(state, env)
-        group_reaping_control(state, env, before)
-        run_phase(state, "public-build", env, 2700)
-        env = json.loads((state / "environment.json").read_text())
-        run_phase(state, "offline-build", env, 1220)
-        run_phase(state, "emulator", env, 420)
-        ACTIVE.check(); complete = True
+        raise KvmFailure("KVM_DIAGNOSTIC_ONLY_STOP")  # Never claim the Android workload completed.
     finally:
         original = sys.exc_info()[1]
         if created:

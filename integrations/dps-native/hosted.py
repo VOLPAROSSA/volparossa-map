@@ -7,6 +7,10 @@ API36/x86_64 test in a disposable network/PID/mount namespace. Only namespace
 loopback is activated. No core daemon, network participation or sensor trial.
 """
 import json
+import errno
+import fcntl
+import grp
+import stat
 from contextlib import contextmanager
 import os
 from pathlib import Path
@@ -24,6 +28,10 @@ WORKFLOW = "Map native DPS quality"
 SERIAL = "emulator-5554"
 PACKAGE = "org.volparossa.map.dps.test"
 RUNNER = PACKAGE + "/androidx.test.runner.AndroidJUnitRunner"
+KVM = Path("/dev/kvm")
+KVM_GET_API_VERSION = 0xAE00  # Linux UAPI _IO(KVMIO, 0x00), system query only.
+PHASES = ("kvm-probe", "public-build", "offline-build", "emulator")
+KVM_PHASES = ("kvm-probe", "emulator")
 
 
 def guards(env):
@@ -38,7 +46,6 @@ def guards(env):
             and re.fullmatch("[0-9a-f]{40}", env.get("GITHUB_SHA", ""))
             and git(ROOT, "rev-parse", "HEAD").decode().strip() == env["GITHUB_SHA"]
             and not git(ROOT, "status", "--porcelain", "--untracked-files=all"), "EXACT_CLEAN_MAP_SOURCE")
-    require(os.access("/dev/kvm", os.R_OK | os.W_OK), "PREEXISTING_KVM_ACCESS_REQUIRED")
     require(Path(env.get("RUNNER_TEMP", "")).is_absolute()
             and all(re.fullmatch("[1-9][0-9]{0,19}", env.get(k, "")) for k in ("GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT")), "RUNNER_TEMP")
 
@@ -48,6 +55,158 @@ def save(path, value):
     with temporary.open("x") as output:
         output.write(json.dumps(value, indent=2, sort_keys=True) + "\n")
     os.replace(temporary, path)
+
+
+class KvmFailure(ValueError):
+    def __init__(self, code, number=None):
+        super().__init__(code)
+        self.errno = number
+
+
+def credentials():
+    groups = sorted(os.getgroups())
+    require(len(groups) <= 64 and len(groups) == len(set(groups)), "CREDENTIAL_GROUP_BOUND")
+    return dict(uid=list(os.getresuid()), gid=list(os.getresgid()), groups=groups)
+
+
+def capability_bits():
+    with Path("/proc/self/status").open() as source:
+        text = source.read(16385)
+    require(len(text) <= 16384, "CAPABILITY_STATUS_BOUND")
+    rows = dict(row.split(":", 1) for row in text.splitlines() if ":" in row)
+    result = {}
+    for name in ("CapEff", "CapPrm", "CapAmb"):
+        value = rows.get(name, "").strip()
+        require(re.fullmatch("[0-9a-fA-F]{1,16}", value), "CAPABILITY_STATUS_SHAPE")
+        result[name] = int(value, 16)
+    return result
+
+
+def device_identity(info):
+    return {name: getattr(info, "st_" + name) for name in
+            ("dev", "ino", "rdev", "mode", "uid", "gid", "nlink", "mtime_ns", "ctime_ns")}
+
+
+def kvm_snapshot():
+    """Read only the fixed device metadata and existing named group, never members."""
+    try:
+        info = KVM.lstat()
+    except OSError as error:
+        raise KvmFailure("KVM_MISSING" if error.errno == errno.ENOENT else "KVM_STAT_FAILED", error.errno) from None
+    if not stat.S_ISCHR(info.st_mode):
+        raise KvmFailure("KVM_WRONG_TYPE")
+    if (os.major(info.st_rdev), os.minor(info.st_rdev)) != (10, 232):
+        raise KvmFailure("KVM_WRONG_DEVICE")
+    try:
+        gid = grp.getgrnam("kvm").gr_gid
+    except KeyError:
+        raise KvmFailure("KVM_GROUP_MISSING") from None
+    if gid <= 0 or gid != info.st_gid:
+        raise KvmFailure("KVM_GROUP_MISMATCH")
+    try:
+        raw_acl = os.getxattr(KVM, "system.posix_acl_access", follow_symlinks=False)
+        if len(raw_acl) > 4096:
+            raise KvmFailure("KVM_ACL_BOUND")
+        acl = dict(present=True, **digest(raw_acl))
+    except OSError as error:
+        if error.errno != errno.ENODATA:
+            raise KvmFailure("KVM_ACL_UNREADABLE", error.errno) from None
+        acl = dict(present=False)
+    result = dict(device=device_identity(info), acl=acl, kvm_gid=gid)
+    try:
+        if device_identity(KVM.lstat()) != result["device"]:
+            raise KvmFailure("KVM_DEVICE_CHANGED")
+    except OSError as error:
+        raise KvmFailure("KVM_DEVICE_CHANGED", error.errno) from None
+    return result
+
+
+def kvm_admission(state):
+    """Metadata receipt exists even if the fixed device/group cannot be used."""
+    result = dict(schema=1, kind="kvm-metadata-only", success=False,
+                  source=os.environ["GITHUB_SHA"], credentials=credentials(), device=None,
+                  actual_open=False, vm_created=False)
+    try:
+        try:
+            result["observed_metadata"] = device_identity(KVM.lstat())
+        except OSError as error:
+            raise KvmFailure("KVM_MISSING" if error.errno == errno.ENOENT else "KVM_STAT_FAILED", error.errno) from None
+        result["device"] = kvm_snapshot()
+        require(result["observed_metadata"] == result["device"]["device"], "KVM_DEVICE_CHANGED")
+        require(result["credentials"]["uid"] == [result["credentials"]["uid"][0]] * 3
+                and result["credentials"]["uid"][0] > 0, "PARENT_UID_AUTHORITY")
+        require(result["credentials"]["gid"] == [result["credentials"]["gid"][0]] * 3
+                and result["credentials"]["gid"][0] != result["device"]["kvm_gid"], "KVM_PRIMARY_GID_OVERLAP")
+        result["outer_access"] = os.access(KVM, os.R_OK | os.W_OK)
+        result["success"] = True  # Metadata admission, not KVM execution acceptance.
+    except (ValueError, OSError) as error:
+        result.update(code=failure_code(error), errno=getattr(error, "errno", None))
+        raise
+    finally:
+        save(state / "kvm-admission.json", result)
+    return result["device"]
+
+
+def drop_credentials(uid, gid, phase, snapshot):
+    """Only probe/emulator receive the sole device-derived supplementary group."""
+    require(os.getuid() == os.geteuid() == 0, "CREDENTIAL_DROP_ROOT")
+    require(phase in PHASES and uid > 0 and gid > 0 and snapshot["kvm_gid"] > 0
+            and gid != snapshot["kvm_gid"], "CREDENTIAL_TARGET")
+    selected = [snapshot["kvm_gid"]] if phase in KVM_PHASES else []
+    try:
+        os.setgroups(selected)
+        os.setresgid(gid, gid, gid)
+        os.setresuid(uid, uid, uid)
+    except OSError as error:
+        raise KvmFailure("CREDENTIAL_DROP_FAILED", error.errno) from None
+    observed = credentials()
+    require(observed == dict(uid=[uid] * 3, gid=[gid] * 3, groups=selected), "CREDENTIAL_DROP_MISMATCH")
+    require(all(value == 0 for value in capability_bits().values()), "CREDENTIAL_CAPABILITIES_REMAIN")
+    return observed
+
+
+def activate_environment(env):
+    # sudo resets the launcher environment. Only after permanent privilege drop
+    # restore the existing bounded build environment for nested guards/rustup.
+    require(os.getuid() == os.geteuid() != 0, "PHASE_ENV_UNPRIVILEGED")
+    require(type(env) is dict and len(env) <= 64 and all(
+        isinstance(k, str) and 0 < len(k) <= 128 and "=" not in k and "\x00" not in k
+        and isinstance(v, str) and len(v) <= 8192 and "\x00" not in v for k, v in env.items()), "PHASE_ENV_BOUND")
+    os.environ.clear(); os.environ.update(env)
+
+
+def kvm_open_query(expected):
+    """Unprivileged system query only. No VM creation or transferred probe FD."""
+    require(os.getuid() == os.geteuid() != 0, "KVM_PROBE_UNPRIVILEGED")
+    fd, original = None, None
+    result = dict(api_version=None, fd_closed=False, vm_created=False)
+    try:
+        require(kvm_snapshot() == expected, "KVM_DEVICE_CHANGED")
+        with ACTIVE.registration():
+            try:
+                fd = os.open(KVM, os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW)
+            except OSError as error:
+                code = "KVM_OPEN_DENIED" if error.errno in (errno.EACCES, errno.EPERM) else "KVM_OPEN_FAILED"
+                raise KvmFailure(code, error.errno) from None
+        require(device_identity(os.fstat(fd)) == expected["device"], "KVM_DEVICE_CHANGED")
+        try:
+            result["api_version"] = fcntl.ioctl(fd, KVM_GET_API_VERSION, 0)
+        except OSError as error:
+            raise KvmFailure("KVM_API_UNAVAILABLE", error.errno) from None
+        require(result["api_version"] == 12, "KVM_API_VERSION_UNSUPPORTED")
+    except BaseException as error:
+        original = error
+        raise
+    finally:
+        if fd is not None:
+            try:
+                with ACTIVE.cleanup():
+                    os.close(fd); result["fd_closed"] = True
+            except BaseException:
+                if original is None:
+                    raise
+    require(result["fd_closed"] and kvm_snapshot() == expected, "KVM_DEVICE_CHANGED")
+    return result
 
 
 def children(pid):
@@ -266,7 +425,8 @@ def baseline():
     rules = subprocess.check_output(["sudo", "-n", "nft", "list", "ruleset"], timeout=10)
     return dict(netns=os.readlink("/proc/self/ns/net"), routes=digest(Path("/proc/net/route").read_bytes()),
                 ipv6_routes=digest(Path("/proc/net/ipv6_route").read_bytes()),
-                resolver=digest(Path("/etc/resolv.conf").read_bytes()), firewall=digest(rules))
+                resolver=digest(Path("/etc/resolv.conf").read_bytes()), firewall=digest(rules),
+                credentials=credentials(), kvm=kvm_snapshot())
 
 
 def environment(state, tools):
@@ -336,21 +496,19 @@ def acquire_build(state, env):
     verify(state / "organicmaps", locked["organicmaps"])
 
 
-def offline(state):
-    """PID1 executes only inside the newly owned root-created namespaces."""
-    require(os.getuid() == 0 and os.geteuid() == 0, "NAMESPACE_BOOTSTRAP_ROOT")
-    outer = json.loads((state / "baseline.json").read_text())
-    require(os.readlink("/proc/self/ns/net") != outer["netns"] and os.getpid() == 1, "DISPOSABLE_NAMESPACES")
-    print("Disposable namespace only: activate its loopback, drop all root groups/UID, run offline synthetic tests.", flush=True)
-    subprocess.run(["/usr/sbin/ip", "link", "set", "lo", "up"], check=True, timeout=10)
-    require(sorted(name for _, name in socket.if_nameindex()) == ["lo"], "OFFLINE_LINKS")
-    owner = state.stat()
-    require(owner.st_uid != 0 and state.resolve(strict=True) == state, "OWNED_STATE")
-    os.setgroups([]); os.setgid(owner.st_gid); os.setuid(owner.st_uid)
-    env = json.loads((state / "environment.json").read_text())
-    guards(env)
-    tools, prepared = state / "tools", state / "prepared"
-    android = prepared / "android"
+def offline_build(state, env):
+    tools = state / "tools"
+    android = state / "prepared/android"
+    run("android-offline-rebuild", gradle(tools, "--offline", "--dependency-verification=strict",
+        ":volparossa_dps_jni:clean", ":volparossa_dps_jni:assembleDebug", ":volparossa_dps_jni:assembleDebugAndroidTest"),
+        state, env, android, seconds=1200)
+    apks = list((android / "volparossa_dps_jni/build/outputs/apk/androidTest/debug").glob("*.apk"))
+    require(len(apks) == 1, "ONE_TEST_APK")
+    save(state / "offline-apk.json", dict(source=env["GITHUB_SHA"], apk=digest(apks[0].read_bytes())))
+
+
+def emulator_trial(state, env):
+    tools, android = state / "tools", state / "prepared/android"
     success, cleanup = False, False
     adb = tools / "sdk/platform-tools/adb"
     emulator = None
@@ -358,9 +516,6 @@ def offline(state):
     def command(label, *args, seconds=30):
         return run(label, [adb, "-s", SERIAL, *args], state, env, seconds=seconds)
     try:
-        run("android-offline-rebuild", gradle(tools, "--offline", "--dependency-verification=strict",
-            ":volparossa_dps_jni:clean", ":volparossa_dps_jni:assembleDebug", ":volparossa_dps_jni:assembleDebugAndroidTest"),
-            state, env, android, seconds=1200)
         # AVD is an owned, hand-written public API36 fixture; no SDK manager,
         # fabricated package metadata or user/global AVD is consulted.
         avd = state / "avd/trial.avd"
@@ -395,7 +550,9 @@ def offline(state):
         command("guest-data-off", "shell", "svc", "data", "disable")
         apks = list((android / "volparossa_dps_jni/build/outputs/apk/androidTest/debug").glob("*.apk"))
         require(len(apks) == 1, "ONE_TEST_APK")
-        save(state / "tested-apk.json", digest(apks[0].read_bytes()))
+        binding = json.loads((state / "offline-apk.json").read_text())
+        require(binding == dict(source=env["GITHUB_SHA"], apk=digest(apks[0].read_bytes())), "OFFLINE_APK_CHANGED")
+        save(state / "tested-apk.json", binding["apk"])
         command("install-test", "install", "--no-streaming", apks[0], seconds=60)
         output = command("instrumentation", "shell", "am", "instrument", "-w", "-r", RUNNER, seconds=180)
         require(b"OK (8 tests)" in output and b"FAILURES" not in output
@@ -433,6 +590,158 @@ def offline(state):
             raise cleanup_error
 
 
+def private_document(directory_fd, name, owner, *, receipt_phase=None):
+    allowed = name in ("baseline.json", "source.json", "environment.json") if receipt_phase is None else (
+        receipt_phase in PHASES and name == "phase-" + receipt_phase + ".json")
+    require(allowed, "PHASE_INPUT_ALLOWLIST")
+    fd, original = None, None
+    try:
+        with ACTIVE.registration():
+            try:
+                fd = os.open(name, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory_fd)
+            except OSError as error:
+                raise KvmFailure("PHASE_INPUT_OPEN", error.errno) from None
+        info = os.fstat(fd)
+        require(stat.S_ISREG(info.st_mode) and info.st_uid == owner.st_uid and info.st_gid == owner.st_gid
+                and info.st_nlink == 1 and stat.S_IMODE(info.st_mode) == 0o600
+                and 0 < info.st_size <= 16384, "PHASE_INPUT_OWNER_BOUND")
+        raw = os.read(fd, 16385)
+        require(len(raw) == info.st_size and device_identity(os.fstat(fd)) == device_identity(info), "PHASE_INPUT_CHANGED")
+        try:
+            value = json.loads(raw)
+        except (ValueError, UnicodeError):
+            raise KvmFailure("PHASE_INPUT_SHAPE") from None
+        require(type(value) is dict, "PHASE_INPUT_SHAPE")
+        return value
+    except BaseException as error:
+        original = error
+        raise
+    finally:
+        if fd is not None:
+            try:
+                with ACTIVE.cleanup(): os.close(fd)
+            except BaseException:
+                if original is None: raise
+
+
+def phase_child(state, phase):
+    """Fixed root bootstrap: device-derived group only, then permanent UID/GID drop."""
+    require(phase in PHASES and os.getuid() == os.geteuid() == 0 and os.getpid() == 1, "PHASE_BOOTSTRAP_ROOT")
+    owner = state.lstat()
+    require(state.resolve(strict=True) == state and stat.S_ISDIR(owner.st_mode)
+            and stat.S_IMODE(owner.st_mode) == 0o700 and owner.st_uid > 0 and owner.st_gid > 0,
+            "PHASE_OWNED_STATE")
+    require(os.environ.get("SUDO_UID") == str(owner.st_uid) and os.environ.get("SUDO_GID") == str(owner.st_gid),
+            "PHASE_SUDO_OWNER")
+    result = dict(schema=1, kind="hosted-phase", phase=phase, source=None, success=False,
+                  credentials=None, capabilities=None, probe=None, device_unchanged=False)
+    directory_fd, receipt_fd, writable, original = None, None, False, None
+    try:
+        # Bind a non-symlink owned directory before privileged file access.
+        with ACTIVE.registration():
+            directory_fd = os.open(state, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW)
+        require(device_identity(os.fstat(directory_fd)) == device_identity(owner), "PHASE_STATE_CHANGED")
+        # Caller preallocates a private regular output file. It stays caller-owned
+        # even for root-bootstrap failures; no chown or permission changes.
+        with ACTIVE.registration():
+            receipt_fd = os.open("phase-" + phase + ".json", os.O_WRONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory_fd)
+        info = os.fstat(receipt_fd)
+        require(stat.S_ISREG(info.st_mode) and info.st_uid == owner.st_uid and info.st_gid == owner.st_gid
+                and info.st_nlink == 1 and info.st_size == 0 and stat.S_IMODE(info.st_mode) == 0o600, "PHASE_RECEIPT_OWNER")
+        writable = True
+        outer = private_document(directory_fd, "baseline.json", owner)
+        require(outer["credentials"]["uid"] == [owner.st_uid] * 3
+                and outer["credentials"]["gid"] == [owner.st_gid] * 3, "PHASE_ORIGINAL_AUTHORITY")
+        source = private_document(directory_fd, "source.json", owner).get("map")
+        require(isinstance(source, str) and re.fullmatch("[0-9a-f]{40}", source), "PHASE_SOURCE_SHAPE")
+        result["source"] = source
+        same_network = os.readlink("/proc/self/ns/net") == outer["netns"]
+        require(same_network == (phase == "public-build"), "PHASE_NETWORK_NAMESPACE")
+        if not same_network:
+            require(sorted(n for _, n in socket.if_nameindex()) == ["lo"], "PHASE_PRIVATE_LINKS")
+            if phase == "emulator":
+                subprocess.run(["/usr/sbin/ip", "link", "set", "lo", "up"], check=True, timeout=5)
+        expected = outer["kvm"]
+        require(kvm_snapshot() == expected, "KVM_DEVICE_CHANGED")
+        result["credentials"] = drop_credentials(owner.st_uid, owner.st_gid, phase, expected)
+        result["capabilities"] = capability_bits()
+        env = private_document(directory_fd, "environment.json", owner)
+        require(env["GITHUB_SHA"] == source, "PHASE_SOURCE")
+        guards(env)
+        activate_environment(env)
+        if phase in KVM_PHASES:
+            result["probe"] = kvm_open_query(expected)
+        if phase == "public-build":
+            acquire_build(state, env)
+        elif phase == "offline-build":
+            offline_build(state, env)
+        elif phase == "emulator":
+            emulator_trial(state, env)
+        require(credentials() == result["credentials"] and capability_bits() == result["capabilities"], "PHASE_CREDENTIAL_CHANGED")
+        require(kvm_snapshot() == expected, "KVM_DEVICE_CHANGED")
+        result.update(success=True, device_unchanged=True)
+    except BaseException as error:
+        original = error
+        result.update(code=failure_code(error), errno=getattr(error, "errno", None))
+        raise
+    finally:
+        finish_error = None
+        if receipt_fd is not None and writable:
+            try:
+                with ACTIVE.cleanup():
+                    raw = (json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n").encode()
+                    require(len(raw) <= 16384, "PHASE_RECEIPT_BOUND")
+                    require(os.write(receipt_fd, raw) == len(raw), "PHASE_RECEIPT_WRITE")
+            except BaseException as error:
+                ACTIVE.cleanup_errors.append(type(error).__name__)
+                finish_error = error
+        # Close both FDs even if writing fails. Neither is transferred to a
+        # workload; an original workload error keeps precedence over cleanup.
+        for fd in (receipt_fd, directory_fd):
+            if fd is None: continue
+            try:
+                with ACTIVE.cleanup(): os.close(fd)
+            except BaseException as error:
+                ACTIVE.cleanup_errors.append(type(error).__name__)
+                if finish_error is None: finish_error = error
+        if original is None and finish_error is not None:
+            raise finish_error
+
+
+def run_phase(state, phase, env, seconds):
+    require(phase in PHASES, "PHASE_ALLOWLIST")
+    path = state / ("phase-" + phase + ".json")
+    # Explicit creation mode, independent of a caller's ambient umask.
+    with ACTIVE.registration():
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600)
+        os.close(fd)
+    run(phase + "-namespace", namespace_command("--inside-" + phase, state, seconds - 2), state, env, seconds=seconds)
+    directory, original = None, None
+    try:
+        with ACTIVE.registration():
+            directory = os.open(state, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW)
+        owner = os.fstat(directory)
+        receipt = private_document(directory, path.name, owner, receipt_phase=phase)
+        outer = private_document(directory, "baseline.json", owner)
+    except BaseException as error:
+        original = error
+        raise
+    finally:
+        if directory is not None:
+            try:
+                with ACTIVE.cleanup(): os.close(directory)
+            except BaseException:
+                if original is None: raise
+    selected = [outer["kvm"]["kvm_gid"]] if phase in KVM_PHASES else []
+    require(receipt["schema"] == 1 and receipt["kind"] == "hosted-phase" and receipt["phase"] == phase
+            and receipt["source"] == env["GITHUB_SHA"] and receipt["success"] is True
+            and receipt["device_unchanged"] is True
+            and receipt["credentials"] == dict(uid=outer["credentials"]["uid"], gid=outer["credentials"]["gid"], groups=selected)
+            and receipt["capabilities"] == dict(CapEff=0, CapPrm=0, CapAmb=0), "PHASE_RECEIPT_CONTRACT")
+    require(receipt["probe"] == (dict(api_version=12, fd_closed=True, vm_created=False) if phase in KVM_PHASES else None),
+            "PHASE_KVM_CONTRACT")
+
+
 def failure_code(error):
     if error is None:
         return None
@@ -456,7 +765,10 @@ def finalize(state, evidence, before, complete, original, control_mode=None):
                     time.sleep(0.01)
             ACTIVE.drain_all()
             drained = not ACTIVE.owned
-            unchanged = before is not None and baseline() == before
+            try:
+                unchanged = before is not None and baseline() == before
+            except BaseException as error:
+                errors.append(failure_code(error)); unchanged = False
             if not unchanged:
                 errors.append("HOST_BASELINE_UNCONFIRMED")
             for path in state.glob("*.json"):
@@ -497,8 +809,10 @@ def finalize(state, evidence, before, complete, original, control_mode=None):
 
 
 def namespace_command(mode, state, seconds):
+    require(mode in ("--inside-cancellation", *("--inside-" + phase for phase in PHASES)), "NAMESPACE_MODE")
+    network = [] if mode == "--inside-public-build" else ["--net"]
     return ["sudo", "-n", "timeout", "--signal=TERM", "--kill-after=1s", str(seconds) + "s",
-            "unshare", "--net", "--pid", "--fork", "--mount-proc", "--kill-child=KILL",
+            "unshare", *network, "--pid", "--fork", "--mount-proc", "--kill-child=KILL",
             "/usr/bin/python3", "-B", HERE / "hosted.py", mode, state]
 
 
@@ -615,8 +929,10 @@ def cancellation_control(state, env):
 
 def main():
     os.umask(0o077)
-    if len(sys.argv) == 3 and sys.argv[1] in ("--inside-offline", "--inside-cancellation"):
-        (offline if sys.argv[1] == "--inside-offline" else inside_cancellation)(Path(sys.argv[2])); return
+    if len(sys.argv) == 3 and sys.argv[1] == "--inside-cancellation":
+        inside_cancellation(Path(sys.argv[2])); return
+    if len(sys.argv) == 3 and sys.argv[1] in tuple("--inside-" + phase for phase in PHASES):
+        phase_child(Path(sys.argv[2]), sys.argv[1].removeprefix("--inside-")); return
     if len(sys.argv) == 5 and sys.argv[1] == "--cancellation-child":
         cancellation_child(Path(sys.argv[2]), Path(sys.argv[3]), sys.argv[4]); return
     require(sys.argv[1:] == ["--reviewed-hosted-fixture"], "NO_ARBITRARY_COMMAND")
@@ -627,16 +943,21 @@ def main():
     try:
         with ACTIVE.registration():
             state.mkdir(mode=0o700); created = True
-        before = baseline(); save(state / "baseline.json", before)
         save(state / "source.json", dict(map=os.environ["GITHUB_SHA"], pins=pins(),
             workflow=WORKFLOW, run=os.environ["GITHUB_RUN_ID"], attempt=os.environ["GITHUB_RUN_ATTEMPT"]))
+        admitted = kvm_admission(state)
+        before = baseline(); require(before["kvm"] == admitted, "KVM_DEVICE_CHANGED")
+        save(state / "baseline.json", before)
         env = environment(state, state / "tools")
         for directory in ("home", "android-home", "gradle-home", "rustup", "cargo"):
             (state / directory).mkdir(mode=0o700)
+        save(state / "environment.json", env)
+        run_phase(state, "kvm-probe", env, 10)  # Before any SDK acquisition/build.
         cancellation_control(state, env)
-        acquire_build(state, env)
-        print("Reviewed hosted fixture: disposable namespaces and namespace loopback only.", flush=True)
-        run("offline-namespace", namespace_command("--inside-offline", state, 1590), state, env, seconds=1600)
+        run_phase(state, "public-build", env, 2700)
+        env = json.loads((state / "environment.json").read_text())
+        run_phase(state, "offline-build", env, 1220)
+        run_phase(state, "emulator", env, 420)
         ACTIVE.check(); complete = True
     finally:
         original = sys.exc_info()[1]

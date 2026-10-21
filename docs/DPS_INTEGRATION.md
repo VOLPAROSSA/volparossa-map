@@ -240,8 +240,9 @@ python3 -B -m unittest discover -s integrations/dps-native -p 'test_*.py' -v
 git diff --check
 ```
 
-These pass for the authored source: source bindings plus 13 inert tests (seven
-Python/Git/archive preparation tests and six lifetime orchestration shims).
+These pass for the current authored correction: source bindings plus 28 inert
+tests (seven Python/Git/archive preparation tests, six lifetime orchestration
+shims, and 15 KVM/phase/input-file shims).
 The shims cover deferred signal delivery until child ownership is registered,
 unblocked child signals without a pre-exec hook, repeated INT/TERM deadlines,
 original-failure precedence, honest incomplete cleanup/state preservation,
@@ -250,7 +251,8 @@ They launch no cancellation child, deliver no OS signal, create no namespace and
 make no privileged call; passing them is not cancellation runtime acceptance. The test fixtures for preparation mechanics are inert text;
 they are never passed to JNI and never represented as real Protobuf goldens.
 No Rust, native, Java, Gradle, SDK, Node, emulator or hardware execution occurred
-on the development host. No workflow was dispatched for this candidate.
+on the development host. The published candidate's failed hosted attempt is
+preserved below; the current four-file KVM correction has not been dispatched.
 
 ## Hosted candidate and evidence boundaries
 
@@ -289,18 +291,22 @@ but this fixture does not build the Organic Maps C++ library or depend on its SD
 Public Gradle/Maven dependency acquisition is explicit. Generated checksum
 verification metadata records acquired dependency consistency, not prior human
 review or release authorization. A second clean APK rebuild requires offline,
-strict dependency verification inside a new network/PID/mount namespace. The same
-namespace runs the installed synthetic test APK on the pinned emulator, with only
-namespace loopback active and guest Wi-Fi/data disabled. Source-level absence of
+strict dependency verification inside a new network/PID/mount namespace without
+KVM group access. A separate namespace runs the installed synthetic test APK on
+the pinned emulator, with only namespace loopback active and guest Wi-Fi/data
+disabled. The exact offline APK hash is checked again before installation. Source-level absence of
 sensor/location/network APIs and the test's permission assertion are distinct from
 physical sensor traces, process identity attestation or measured absence of every
 socket attempt. There is no admin socket, daemon or host location access.
 
 Privilege is limited to read-only host firewall baselines, creating disposable
 namespaces, activating their loopback, and terminating the exact owned supervisor
-process group if necessary. Namespace bootstrap drops root UID/GID/groups before
-build/emulator work. No host DNS, routes, nftables rules, VPN or sysctls are changed.
-Before/after route/resolver/firewall hashes must match. Command output, elapsed
+process group if necessary. Namespace bootstrap permanently drops all UID/GID
+identities before workloads and clears supplementary groups for all builds.
+Only the KVM probe and emulator receive the one validated device-derived KVM
+group. No host DNS, routes, nftables rules, VPN or sysctls are changed.
+Before/after route/resolver/firewall, parent credentials and KVM metadata/ACL
+observations must match. Command output, elapsed
 wall time and sampled descendant RSS are bounded; the RSS monitor is not a hard
 kernel cgroup memory limit. Commands register and drain their process groups. Runtime PID namespace
 termination supplies the final descendant boundary; source checks alone do not
@@ -313,6 +319,102 @@ source/tool state and retention of fixed public receipts are required for succes
 Unconfirmed cleanup preserves remaining state for disposable-runner teardown. No cache reuses test outcomes. Hard workflow termination
 may prevent final receipts; the disposable runner teardown is then the external
 cleanup boundary and no completed cleanup claim is accepted.
+
+### Preserved failed attempt and KVM correction: unrun
+
+Published Map source `3abb91fa56a5bdf1b27337c689a409986caed793`, tree
+`58fa25a8e89c6d08897d4ba9c06eaf35c66dee85`, passed source run `39664119379`
+with 13 inert tests; its test-merge source was `02857cad`. Actual hosted run
+[39664284521](https://github.com/VOLPAROSSA/volparossa-map/actions/runs/39664284521)
+failed immediately with `PREEXISTING_KVM_ACCESS_REQUIRED`, before fixture/tool
+acquisition or creation of an evidence directory. There were **no artifacts**.
+Its preserved original log SHA-256 is
+`c29da4f2e6334059955b7f516120b986ded64e6f6f53f2de33f2b6697415b533`.
+The log proves only that the runner's `os.access` check returned false. It does
+not establish whether KVM was missing, its type/mode/group, ACL state, or whether
+an unprivileged open/API query could succeed. Neither cancellation controls nor
+Android/native tests ran. This failure is not replaced by a successful simulation.
+
+The current correction keeps all pins and Android/JNI sources unchanged. After
+hosted/exact-source admission, it creates owned state and writes a bounded private
+metadata receipt before KVM failure or expensive acquisition. It reads the fixed
+`/dev/kvm` path: a non-symlink character device with Linux misc identity `10:232`,
+the existing named, nonzero `kvm` group matching that device's GID, device
+identity/mode/owner/link/timestamps, and the presence/hash of its POSIX access ACL.
+ACL bytes and group membership lists from the account database are not persisted.
+Unsupported/unreadable ACL queries, absent/mismatched groups, changed devices,
+denied opens and unsupported APIs fail closed with fixed codes and numeric errno.
+The outer access boolean is diagnostic only; it no longer rejects valid delegated
+access. A primary GID equal to the KVM GID is rejected because this correction
+preserves the original primary GID while excluding KVM from build phases.
+
+The root namespace launcher derives the sole supplementary group from that
+validated device, sets all real/effective/saved GID and UID identities to the
+original nonroot owner, and verifies exact credentials plus zero effective,
+permitted and ambient capabilities. The parent process keeps its original
+credentials/groups, which enter before/after baselines. No account membership,
+chmod, ACL, udev, sudoers or service configuration changes are made. Existing
+sudo/namespace support is required, not assumed proven by the earlier failure.
+Supplementary groups are process credentials preserved across exec; see the
+[Linux group interface](https://man7.org/linux/man-pages/man2/setgroups.2.html).
+
+Four fixed phases run through registered namespace supervisors:
+
+| Phase | Network | Supplementary groups | Outer command limit |
+| --- | --- | --- | --- |
+| `kvm-probe` | New network/PID/mount namespaces; no external link | Sole validated KVM GID | 10 seconds |
+| `public-build` | Original public network; new PID/mount namespaces | Empty | 2,700 seconds |
+| `offline-build` | New network/PID/mount namespaces | Empty | 1,220 seconds |
+| `emulator` | Separate new network/PID/mount namespaces; loopback only | Sole validated KVM GID | 420 seconds |
+
+The public-build phase moves the **existing** archive/source/dependency
+acquisition and Rust/Gradle build commands into an empty-group nonroot process.
+It introduces no new SDK/plugin/dependency or product execution. This phase is
+needed because clearing groups in the parent would change its authority, and
+retaining arbitrary original groups could give a build KVM access on another
+runner image. After permanent UID/GID drop, the existing bounded environment is
+restored inside that process because sudo resets it; nested admission checks and
+runner rustup discovery retain the same inputs. No caller environment is applied
+while the bootstrap is root. Offline rebuilding and emulator work are separated so Gradle/native
+builds never receive the delegated KVM group. The root `timeout` is two seconds
+shorter than each outer command limit, with one-second TERM-to-KILL escalation;
+existing resource monitoring, signal registration and cleanup rules still apply.
+
+Before acquisition, the dropped-privilege probe actually opens the unchanged
+device using read/write, no-follow and close-on-exec flags, verifies the opened
+identity, queries only `KVM_GET_API_VERSION`, requires `12`, and closes its FD.
+It creates no VM. The emulator phase repeats this probe before starting tools.
+The KVM FD is neither passed to another process nor retained for emulator use;
+the emulator opens its own device after the probe closes. See the
+[Linux KVM API](https://docs.kernel.org/virt/kvm/api.html). A successful version
+query alone does not prove VM creation, acceleration, Android execution or JNI.
+No software-emulator fallback is allowed.
+
+Privileged inputs are limited to three fixed caller-owned JSON files, opened
+relative to a validated non-symlink private directory FD. Each must be a single
+regular file with matching UID/GID, mode `0600`, and size `1..16384`; no-follow,
+close-on-exec and stable-read checks reject symlinks, hardlinks and changes.
+Fixed input and receipt opens also use `O_NONBLOCK`, so a replaced FIFO cannot
+block the bootstrap before regular-file validation.
+Only the fixed phase name is accepted. The caller preallocates each phase receipt
+as an empty, single-link, matching-owner regular file at mode `0600`. The child
+opens it relative to the held directory FD and writes at most 16 KiB, preserving
+caller ownership even if UID dropping fails. Both metadata FDs are close-on-exec
+and closed in finalization; neither is a KVM FD. Parent acceptance also requires
+zero supervisor exit, drained group, exact source/phase/credentials/capabilities,
+unchanged device and the correct probe contract, rather than a receipt alone.
+Failed baseline reads retain public failure receipts and cannot accept cleanup.
+
+The 15 added inert shims mock KVM metadata, credentials and every KVM open/ioctl.
+They cover group/ACL/device rejection, permanent-drop ordering and exact group
+selection, residual capability/group rejection, probe failure/FD closing and a
+deferred cancellation after open, fixed namespace profiles, probe-before-build
+ordering, bounded non-symlink bootstrap inputs, and nonblocking FIFO type rejection
+before input reads or receipt writes. The FIFO cases mock opens and stat results;
+they create no FIFO or privileged process. Local temporary-file tests
+exercise only ordinary owned files. No local device, privilege, namespace, SDK,
+VM, OS-signal or hardware trial occurred. Actual KVM delegation, sudo compatibility,
+phase cleanup and all eight Android tests remain **unrun** for this correction.
 
 ### Catchable cancellation candidate: unrun
 

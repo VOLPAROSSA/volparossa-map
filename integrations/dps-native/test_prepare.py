@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Inert Python/Git/archive tests only; none executes Rust/JNI/Android or a controller."""
 import copy
+import errno
+from types import SimpleNamespace
 import json
 from pathlib import Path
 import stat
@@ -239,6 +241,232 @@ class LifetimeShimTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "HOSTED_ONLY"):
                 H.cancellation_control(self.root, {})
             spawn.assert_not_called()
+
+
+class KvmShimTests(unittest.TestCase):
+    """No local KVM device, ioctl, credentials, namespace, signal or workload execution."""
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.life = H.Lifetime()
+        self.enterContext(patch.object(H, "ACTIVE", self.life))
+        self.enterContext(patch.object(H.signal, "setitimer"))
+        self.enterContext(patch.object(H.signal, "getitimer", return_value=(0.0, 0.0)))
+        self.info = SimpleNamespace(st_dev=1, st_ino=2, st_rdev=H.os.makedev(10, 232),
+            st_mode=stat.S_IFCHR | 0o660, st_uid=0, st_gid=78, st_nlink=1, st_mtime_ns=3, st_ctime_ns=4)
+        self.kvm = self.enterContext(patch.object(H, "KVM", unittest.mock.Mock()))
+        self.kvm.lstat.return_value = self.info
+        self.acl = self.enterContext(patch.object(H.os, "getxattr", side_effect=OSError(errno.ENODATA, "inert")))
+        self.group = self.enterContext(patch.object(H.grp, "getgrnam", return_value=SimpleNamespace(gr_gid=78)))
+        self.expected = dict(device=H.device_identity(self.info), acl=dict(present=False), kvm_gid=78)
+
+    def test_snapshot_binds_named_group_device_acl_and_rejects_changed_identity(self):
+        self.assertEqual(H.kvm_snapshot(), self.expected)
+        self.group.assert_called_with("kvm")
+        self.acl.assert_called_with(self.kvm, "system.posix_acl_access", follow_symlinks=False)
+        self.acl.side_effect = None; self.acl.return_value = b"inert ACL"
+        self.assertEqual(H.kvm_snapshot()["acl"], dict(present=True, **P.digest(b"inert ACL")))
+        changed = SimpleNamespace(**vars(self.info)); changed.st_ino = 99
+        self.kvm.lstat.side_effect = [self.info, changed]
+        with self.assertRaisesRegex(ValueError, "KVM_DEVICE_CHANGED"):
+            H.kvm_snapshot()
+
+    def test_missing_wrong_type_wrong_device_group_acl_fail_closed_without_open(self):
+        cases = [("missing", "KVM_MISSING"), ("type", "KVM_WRONG_TYPE"), ("device", "KVM_WRONG_DEVICE"),
+                 ("no_group", "KVM_GROUP_MISSING"), ("root_group", "KVM_GROUP_MISMATCH"),
+                 ("mismatch", "KVM_GROUP_MISMATCH"), ("acl", "KVM_ACL_UNREADABLE"), ("large_acl", "KVM_ACL_BOUND")]
+        for case, code in cases:
+            with self.subTest(case=case), patch.object(H.os, "open") as opened:
+                self.kvm.lstat.side_effect = None; self.kvm.lstat.return_value = self.info
+                self.group.side_effect = None; self.group.return_value = SimpleNamespace(gr_gid=78)
+                self.acl.side_effect = OSError(errno.ENODATA, "inert")
+                if case == "missing": self.kvm.lstat.side_effect = FileNotFoundError(errno.ENOENT, "inert")
+                elif case in ("type", "device"):
+                    changed = SimpleNamespace(**vars(self.info))
+                    if case == "type": changed.st_mode = stat.S_IFLNK | 0o777
+                    else: changed.st_rdev = H.os.makedev(1, 3)
+                    self.kvm.lstat.return_value = changed
+                elif case == "no_group": self.group.side_effect = KeyError("inert")
+                elif case == "root_group": self.group.return_value = SimpleNamespace(gr_gid=0)
+                elif case == "mismatch": self.group.return_value = SimpleNamespace(gr_gid=79)
+                elif case == "acl": self.acl.side_effect = OSError(errno.EOPNOTSUPP, "inert")
+                elif case == "large_acl": self.acl.side_effect = None; self.acl.return_value = b"x" * 4097
+                with self.assertRaisesRegex(ValueError, code): H.kvm_snapshot()
+                opened.assert_not_called()
+
+    def test_admission_failure_keeps_bounded_private_metadata_receipt(self):
+        creds = dict(uid=[1001] * 3, gid=[1001] * 3, groups=[27, 1001])
+        with patch.object(H, "credentials", return_value=creds), patch.dict(H.os.environ, {"GITHUB_SHA": "a" * 40}):
+            self.group.side_effect = KeyError("inert")
+            with self.assertRaisesRegex(ValueError, "KVM_GROUP_MISSING"): H.kvm_admission(self.root)
+        result = json.loads((self.root / "kvm-admission.json").read_text())
+        self.assertFalse(result["success"]); self.assertFalse(result["actual_open"])
+        self.assertEqual(result["observed_metadata"], self.expected["device"])
+        self.assertEqual(result["credentials"], creds)
+        self.assertEqual(result["code"], "KVM_GROUP_MISSING")
+        self.assertLess((self.root / "kvm-admission.json").stat().st_size, 4096)
+
+    def test_drop_phase_matrix_has_permanent_ids_exact_groups_zero_caps_and_order(self):
+        for phase in H.PHASES:
+            selected = [78] if phase in H.KVM_PHASES else []
+            expected = dict(uid=[1001] * 3, gid=[1001] * 3, groups=selected)
+            calls = []
+            with self.subTest(phase=phase), patch.object(H.os, "getuid", return_value=0), patch.object(H.os, "geteuid", return_value=0), \
+                 patch.object(H.os, "setgroups", side_effect=lambda v: calls.append(("groups", v))), \
+                 patch.object(H.os, "setresgid", side_effect=lambda *v: calls.append(("gid", v))), \
+                 patch.object(H.os, "setresuid", side_effect=lambda *v: calls.append(("uid", v))), \
+                 patch.object(H, "credentials", return_value=expected), \
+                 patch.object(H, "capability_bits", return_value=dict(CapEff=0, CapPrm=0, CapAmb=0)):
+                self.assertEqual(H.drop_credentials(1001, 1001, phase, self.expected), expected)
+            self.assertEqual(calls, [("groups", selected), ("gid", (1001,1001,1001)), ("uid", (1001,1001,1001))])
+
+    def test_wrong_credential_target_or_residual_groups_caps_rejected(self):
+        with patch.object(H.os, "getuid", return_value=0), patch.object(H.os, "geteuid", return_value=0), \
+             patch.object(H.os, "setgroups") as groups, patch.object(H.os, "setresgid"), patch.object(H.os, "setresuid"), \
+             patch.object(H, "credentials", return_value=dict(uid=[1001]*3, gid=[1001]*3, groups=[0,78])), \
+             patch.object(H, "capability_bits", return_value=dict(CapEff=1, CapPrm=0, CapAmb=0)):
+            with self.assertRaisesRegex(ValueError, "CREDENTIAL_TARGET"): H.drop_credentials(1001, 78, "emulator", self.expected)
+            groups.assert_not_called()
+            with self.assertRaisesRegex(ValueError, "CREDENTIAL_DROP_MISMATCH"):
+                H.drop_credentials(1001, 1001, "emulator", self.expected)
+            with patch.object(H, "credentials", return_value=dict(uid=[1001]*3, gid=[1001]*3, groups=[78])):
+                with self.assertRaisesRegex(ValueError, "CREDENTIAL_CAPABILITIES_REMAIN"):
+                    H.drop_credentials(1001, 1001, "emulator", self.expected)
+
+    def test_existing_build_environment_is_restored_only_after_nonroot_drop(self):
+        env = dict(PATH="/inert", GITHUB_SHA="a" * 40, ImageOS="ubuntu24")
+        with patch.dict(H.os.environ, {"SUDO_UID": "1001"}, clear=True), patch.object(H.os, "getuid", return_value=0), patch.object(H.os, "geteuid", return_value=0):
+            with self.assertRaisesRegex(ValueError, "PHASE_ENV_UNPRIVILEGED"):
+                H.activate_environment(env)
+            self.assertEqual(dict(H.os.environ), {"SUDO_UID": "1001"})
+            with patch.object(H.os, "getuid", return_value=1001), patch.object(H.os, "geteuid", return_value=1001):
+                H.activate_environment(env)
+                self.assertEqual(dict(H.os.environ), env)
+                with self.assertRaisesRegex(ValueError, "PHASE_ENV_BOUND"):
+                    H.activate_environment(dict(PATH="x" * 8193))
+                self.assertEqual(dict(H.os.environ), env)
+
+    def test_actual_probe_call_contract_is_mocked_query_only_and_fd_closed(self):
+        with patch.object(H.os, "getuid", return_value=1001), patch.object(H.os, "geteuid", return_value=1001), \
+             patch.object(H, "kvm_snapshot", return_value=self.expected), patch.object(H.os, "open", return_value=23) as opened, \
+             patch.object(H.os, "fstat", return_value=self.info), patch.object(H.os, "close") as close, \
+             patch.object(H.fcntl, "ioctl", return_value=12) as query, patch.object(self.life, "spawn") as spawn:
+            self.assertEqual(H.kvm_open_query(self.expected), dict(api_version=12, fd_closed=True, vm_created=False))
+            opened.assert_called_once_with(self.kvm, H.os.O_RDWR | H.os.O_CLOEXEC | H.os.O_NOFOLLOW)
+            query.assert_called_once_with(23, 0xAE00, 0)
+            close.assert_called_once_with(23); spawn.assert_not_called()
+
+    def test_probe_denied_bad_api_or_changed_fd_closes_owned_descriptor(self):
+        for case, code, closed in [("denied", "KVM_OPEN_DENIED", False), ("ioctl", "KVM_API_UNAVAILABLE", True),
+                                   ("version", "KVM_API_VERSION_UNSUPPORTED", True), ("changed", "KVM_DEVICE_CHANGED", True)]:
+            with self.subTest(case=case), patch.object(H.os, "getuid", return_value=1001), patch.object(H.os, "geteuid", return_value=1001), \
+                 patch.object(H, "kvm_snapshot", return_value=self.expected), patch.object(H.os, "open", return_value=23) as opened, \
+                 patch.object(H.os, "fstat", return_value=self.info) as fstat, patch.object(H.os, "close") as close, \
+                 patch.object(H.fcntl, "ioctl", return_value=12) as query:
+                if case == "denied": opened.side_effect = PermissionError(errno.EACCES, "inert")
+                elif case == "ioctl": query.side_effect = OSError(errno.ENOTTY, "inert")
+                elif case == "version": query.return_value = 11
+                elif case == "changed":
+                    changed = SimpleNamespace(**vars(self.info)); changed.st_ino = 99; fstat.return_value = changed
+                with self.assertRaisesRegex(ValueError, code): H.kvm_open_query(self.expected)
+                self.assertEqual(close.call_count, int(closed))
+
+    def test_deferred_cancel_after_probe_open_still_closes_fd(self):
+        with patch.object(H.os, "getuid", return_value=1001), patch.object(H.os, "geteuid", return_value=1001), \
+             patch.object(H, "kvm_snapshot", return_value=self.expected), patch.object(H.os, "open", return_value=23), \
+             patch.object(H.os, "close") as close, patch.object(self.life, "check", side_effect=[None, H.Interrupted("HOSTED_INTERRUPTED")]), \
+             patch.object(H.fcntl, "ioctl") as query:
+            with self.assertRaisesRegex(H.Interrupted, "HOSTED_INTERRUPTED"): H.kvm_open_query(self.expected)
+            close.assert_called_once_with(23); query.assert_not_called()
+
+    def test_private_bootstrap_input_is_bounded_owned_nofollow_json(self):
+        path = self.root / "baseline.json"
+        fd = H.os.open(path, H.os.O_CREAT | H.os.O_EXCL | H.os.O_WRONLY, 0o600)
+        H.os.write(fd, b'{"inert":true}'); H.os.close(fd)
+        directory = H.os.open(self.root, H.os.O_RDONLY | H.os.O_DIRECTORY)
+        try:
+            self.assertEqual(H.private_document(directory, "baseline.json", self.root.stat()), {"inert": True})
+            path.unlink(); path.symlink_to(self.root / "not-admitted")
+            with self.assertRaisesRegex(ValueError, "PHASE_INPUT_OPEN"):
+                H.private_document(directory, "baseline.json", self.root.stat())
+            path.unlink()
+            oversized = H.os.open(path, H.os.O_CREAT | H.os.O_EXCL | H.os.O_WRONLY, 0o600)
+            H.os.write(oversized, b"x" * 16385); H.os.close(oversized)
+            with self.assertRaisesRegex(ValueError, "PHASE_INPUT_OWNER_BOUND"):
+                H.private_document(directory, "baseline.json", self.root.stat())
+        finally: H.os.close(directory)
+
+    def test_bootstrap_input_allowlist_hardlinks_and_nonobject_json_reject(self):
+        path = self.root / "source.json"
+        fd = H.os.open(path, H.os.O_CREAT | H.os.O_EXCL | H.os.O_WRONLY, 0o600)
+        H.os.write(fd, b'[]'); H.os.close(fd)
+        directory = H.os.open(self.root, H.os.O_RDONLY | H.os.O_DIRECTORY)
+        try:
+            with self.assertRaisesRegex(ValueError, "PHASE_INPUT_ALLOWLIST"):
+                H.private_document(directory, "arbitrary.json", self.root.stat())
+            with self.assertRaisesRegex(ValueError, "PHASE_INPUT_SHAPE"):
+                H.private_document(directory, "source.json", self.root.stat())
+            H.os.link(path, self.root / "second-name")
+            with self.assertRaisesRegex(ValueError, "PHASE_INPUT_OWNER_BOUND"):
+                H.private_document(directory, "source.json", self.root.stat())
+        finally: H.os.close(directory)
+
+    def test_mocked_fifo_input_opens_nonblocking_and_rejects_before_read(self):
+        owner = SimpleNamespace(st_uid=1001, st_gid=1001)
+        fifo = SimpleNamespace(st_mode=stat.S_IFIFO | 0o600, st_uid=1001, st_gid=1001,
+                               st_nlink=1, st_size=0)
+        with patch.object(H.os, "open", return_value=23) as opened, \
+             patch.object(H.os, "fstat", return_value=fifo), patch.object(H.os, "read") as read, \
+             patch.object(H.os, "close") as close:
+            with self.assertRaisesRegex(ValueError, "PHASE_INPUT_OWNER_BOUND"):
+                H.private_document(22, "baseline.json", owner)
+            opened.assert_called_once_with("baseline.json",
+                H.os.O_RDONLY | H.os.O_CLOEXEC | H.os.O_NOFOLLOW | H.os.O_NONBLOCK, dir_fd=22)
+            read.assert_not_called(); close.assert_called_once_with(23)
+
+    def test_mocked_fifo_receipt_opens_nonblocking_and_rejects_before_work(self):
+        owner = SimpleNamespace(st_dev=1, st_ino=2, st_rdev=0, st_mode=stat.S_IFDIR | 0o700,
+            st_uid=1001, st_gid=1001, st_nlink=1, st_mtime_ns=3, st_ctime_ns=4)
+        fifo = SimpleNamespace(st_mode=stat.S_IFIFO | 0o600, st_uid=1001, st_gid=1001,
+                               st_nlink=1, st_size=0)
+        state = unittest.mock.Mock()
+        state.lstat.return_value = owner; state.resolve.return_value = state
+        with patch.dict(H.os.environ, dict(SUDO_UID="1001", SUDO_GID="1001")), \
+             patch.object(H.os, "getuid", return_value=0), patch.object(H.os, "geteuid", return_value=0), \
+             patch.object(H.os, "getpid", return_value=1), patch.object(H.os, "open", side_effect=[22, 23]) as opened, \
+             patch.object(H.os, "fstat", side_effect=[owner, fifo]), patch.object(H.os, "close") as close, \
+             patch.object(H.os, "write") as write, patch.object(H, "private_document") as document, \
+             patch.object(H, "drop_credentials") as drop, patch.object(H, "acquire_build") as build:
+            with self.assertRaisesRegex(ValueError, "PHASE_RECEIPT_OWNER"):
+                H.phase_child(state, "public-build")
+            self.assertEqual(opened.call_args_list, [
+                unittest.mock.call(state, H.os.O_RDONLY | H.os.O_DIRECTORY | H.os.O_CLOEXEC | H.os.O_NOFOLLOW),
+                unittest.mock.call("phase-public-build.json",
+                    H.os.O_WRONLY | H.os.O_CLOEXEC | H.os.O_NOFOLLOW | H.os.O_NONBLOCK, dir_fd=22)])
+            self.assertEqual(close.call_args_list, [unittest.mock.call(23), unittest.mock.call(22)])
+            write.assert_not_called(); document.assert_not_called(); drop.assert_not_called(); build.assert_not_called()
+
+    def test_namespace_profiles_preserve_public_network_only_for_build(self):
+        for phase in H.PHASES:
+            command = H.namespace_command("--inside-" + phase, self.root, 10)
+            self.assertEqual("--net" in command, phase != "public-build")
+            self.assertIn("--pid", command); self.assertIn("--mount-proc", command)
+        with self.assertRaisesRegex(ValueError, "NAMESPACE_MODE"):
+            H.namespace_command("--arbitrary", self.root, 10)
+
+    def test_outer_orchestration_probes_before_acquisition_and_separates_builds(self):
+        env = dict(RUNNER_TEMP=str(self.root), GITHUB_RUN_ID="1", GITHUB_RUN_ATTEMPT="1", GITHUB_SHA="a"*40)
+        observed = []
+        before = dict(kvm=self.expected)
+        with patch.dict(H.os.environ, env, clear=True), patch.object(H.sys, "argv", ["hosted.py", "--reviewed-hosted-fixture"]), \
+             patch.object(H, "guards"), patch.object(H, "environment", return_value=env), \
+             patch.object(H, "kvm_admission", return_value=self.expected), patch.object(H, "baseline", return_value=before), \
+             patch.object(H, "run_phase", side_effect=lambda state, phase, *_: observed.append(phase)), \
+             patch.object(H, "cancellation_control", side_effect=lambda *_: observed.append("cancellation")), \
+             patch.object(H, "acquire_build") as build, patch.object(H, "finalize") as finalizer:
+            H.main()
+            build.assert_not_called(); finalizer.assert_called_once()
+        self.assertEqual(observed, ["kvm-probe", "cancellation", "public-build", "offline-build", "emulator"])
 
 
 if __name__ == "__main__":

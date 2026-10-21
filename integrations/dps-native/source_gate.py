@@ -41,6 +41,17 @@ def main():
     tests = (module / "src/androidTest/java/org/volparossa/map/dps/QualityInstrumentedTest.java").read_text()
     hosted = (HERE / "hosted.py").read_text()
     require(len(re.findall(r"@Test public void ", tests)) == 8 and "OK (8 tests)" in hosted, "INSTRUMENTATION_INVENTORY")
+    parsed = ast.parse(hosted)
+    constants = {node.targets[0].id: ast.literal_eval(node.value) for node in parsed.body
+                 if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
+                 and node.targets[0].id in ("PHASES", "KVM_PHASES", "KVM_GET_API_VERSION")}
+    require(constants == dict(PHASES=("kvm-probe", "public-build", "offline-build", "emulator"),
+                KVM_PHASES=("kvm-probe", "emulator"), KVM_GET_API_VERSION=0xAE00), "KVM_PHASE_ALLOWLIST")
+    for node in ast.walk(parsed):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            require(node.func.attr not in ("chmod", "chown", "setxattr", "removexattr", "initgroups"), "NO_KVM_HOST_MUTATION")
+    require("PREEXISTING_KVM_ACCESS_REQUIRED" not in hosted and "KVM_CREATE_VM" not in hosted,
+            "KVM_QUERY_ONLY")
     workflow = (HERE.parents[1] / ".github/workflows/dps-native.yml").read_text()
     require("run: exec python3 -B integrations/dps-native/hosted.py --reviewed-hosted-fixture" in workflow,
             "DIRECT_SIGNAL_ENTRY")

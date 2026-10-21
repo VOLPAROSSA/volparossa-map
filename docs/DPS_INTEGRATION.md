@@ -3,10 +3,18 @@
 This document maps the shared VOLPAROSSA positioning service (DPS) to Organic
 Maps' pinned native location inputs. It records integration seams, not an
 implemented adapter or evidence of improved positioning. The core design is
-[`DPS.md` at core PR #299 candidate `d249f0b8`](https://github.com/VOLPAROSSA/volparossa/blob/d249f0b8c6f60801c0c4b70da96794841f6bf06c/docs/services/DPS.md).
-The initial `528b01d5` candidate failed its CLI build in Quality `39608983858`;
-this corrected candidate still needs completed hosted checks. It is not a
-merged-main guarantee, and no native Map integration has been accepted.
+[`DPS.md` at core PR #299 candidate `4e673a5a`](https://github.com/VOLPAROSSA/volparossa/blob/4e673a5a5a9b0c3ad08325999496b72461ba301a/docs/services/DPS.md).
+The corrected contract uses request field 64 and response field 64, retaining
+local-control envelope version 2 and DPS schema version 1. The initial prototype's
+request 46/response 34 overlapped retained Storage interfaces and are superseded
+without DPS aliases. Consumers must not implement those prototype assignments.
+
+Earlier source `1fd9397e` passes Quality `39612903195`, including 17 DPS tests,
+and CodeQL `39612896634`; those results do not accept the corrected allocation.
+The pinned candidate requires its own Quality `39616727891` and CodeQL
+`39616721234` results. It is not a merged-main guarantee, and no native Map
+integration has been accepted. The core ledger preserves the initial build,
+lockfile and lint failures alongside subsequent evidence.
 
 ## Existing native inputs
 

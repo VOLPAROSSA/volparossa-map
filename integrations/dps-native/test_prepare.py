@@ -737,6 +737,27 @@ class EmulatorObservationTests(unittest.TestCase):
         self.assertEqual(receipt["last_nonfatal_boot_poll"], dict(attempt=1, attempts_truncated=False, code="VALUE_ERROR"))
         self.assertTrue(receipt["direct_children_reaped"]); self.assertEqual(receipt["cleanup_observation"]["stage"], "COMPLETE")
 
+    def test_adb_listener_uses_upstream_loopback_form_and_preserves_client_arguments(self):
+        children = iter([self.child([None]), self.child([None])])
+        def spawn(*args, **kwargs):
+            child = next(children); self.life.owned.append(child); return child
+        def command(label, *args, **kwargs):
+            if label == "boot-1": return b"1\n"
+            raise ValueError("STOP_AT_GUEST_IDENTITY")
+        with patch.object(self.life, "spawn", side_effect=spawn) as launch, \
+             patch.object(self.life, "drain_all", side_effect=self.life.owned.clear), \
+             patch.object(H, "run", side_effect=command) as run, patch.object(H.time, "monotonic", return_value=10):
+            with self.assertRaisesRegex(ValueError, "STOP_AT_GUEST_IDENTITY"):
+                H.emulator_trial(self.root, dict(GITHUB_SHA=self.source))
+        adb = self.root / "tools/sdk/platform-tools/adb"
+        self.assertEqual(launch.call_count, 2)
+        self.assertEqual(launch.call_args_list[0].args[0],
+                         [str(adb), "-L", "tcp:localhost:5037", "nodaemon", "server"])
+        self.assertEqual(run.call_args_list[0].args,
+                         ("boot-1", [adb, "-s", H.SERIAL, "shell", "getprop", "sys.boot_completed"],
+                          self.root, dict(GITHUB_SHA=self.source)))
+        self.assertEqual(run.call_args_list[0].kwargs, dict(seconds=3))
+
     def test_primary_boot_failure_and_cleanup_group_failure_remain_separate(self):
         def command(*args, **kwargs): raise ValueError("STEP_BOOT-1")
         def cleanup(): raise ValueError("PROCESS_GROUP_DRAIN")
@@ -775,6 +796,30 @@ class EmulatorObservationTests(unittest.TestCase):
         encoded = json.dumps(observed)
         self.assertNotIn("SECRET", encoded); self.assertNotIn("https://", encoded); self.assertNotIn(str(self.root), encoded)
         self.assertLessEqual(len(encoded.encode()), 16384)
+
+    def test_adb_listener_literals_match_exact_case_with_raw_newline_fixtures(self):
+        literals = (("ADB_LISTEN_HOST_UNSUPPORTED", b"listening on specified hostname currently unsupported"),
+                    ("ADB_SMARTSOCKET_LISTENER_FATAL", b"could not install *smartsocket* listener:"))
+        for marker, literal in literals:
+            for newline in (b"\n", b"\r\n"):
+                with self.subTest(marker=marker, newline=newline):
+                    self.terminal_files(b"", b"private-prefix " + literal + newline + b"private-suffix")
+                    observed = H.emulator_failure_diagnostic(self.root, self.source)
+                    self.assertIsNone(observed["capture_error"])
+                    self.assertEqual(observed["logs"][1]["observed_markers"], [marker])
+                    self.assertEqual(observed["logs"][0]["observed_markers"], [])
+                    self.assertNotIn("private-", json.dumps(observed))
+
+    def test_adb_listener_literals_reject_changed_case_truncation_and_nearby_messages(self):
+        for literal in (b"listening on specified hostname currently unsupported",
+                        b"could not install *smartsocket* listener:"):
+            for raw in (literal.upper(), literal[:1].upper() + literal[1:], literal[:-1],
+                        literal.replace(b" ", b"\n", 1), b"listener unsupported; could not install socket"):
+                with self.subTest(raw=raw):
+                    self.terminal_files(b"", raw)
+                    observed = H.emulator_failure_diagnostic(self.root, self.source)
+                    self.assertIsNone(observed["capture_error"])
+                    self.assertEqual(observed["logs"][1]["observed_markers"], [])
 
     def test_live_or_undrained_namespace_rejects_before_any_log_open(self):
         for mode in ("summary", "owned", "zero-exit"):

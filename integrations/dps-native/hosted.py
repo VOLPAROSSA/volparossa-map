@@ -866,7 +866,9 @@ def emulator_failure_diagnostic(state, source):
                         "EMULATOR_DIAGNOSTIC_NOT_DRAINED")
                 result["namespace_exit"] = summary["exit"]
                 markers = {"ERROR_TOKEN": (b"ERROR",), "FATAL_TOKEN": (b"FATAL",), "KVM_TOKEN": (b"KVM",),
-                           "AVD_TOKEN": (b"AVD",), "VULKAN_TOKEN": (b"Vulkan", b"VULKAN"), "QT_PLATFORM_TOKEN": (b"Qt platform",)}
+                           "AVD_TOKEN": (b"AVD",), "VULKAN_TOKEN": (b"Vulkan", b"VULKAN"), "QT_PLATFORM_TOKEN": (b"Qt platform",),
+                           "ADB_LISTEN_HOST_UNSUPPORTED": (b"listening on specified hostname currently unsupported",),
+                           "ADB_SMARTSOCKET_LISTENER_FATAL": (b"could not install *smartsocket* listener:",)}
                 for role, name in (("emulator", "emulator.private.log"), ("adb_server", "adb.private.log")):
                     fd, info = owned_file(name, 64 * 1024**2)
                     size, samples, windows = info.st_size, [], []
@@ -915,7 +917,7 @@ def emulator_trial(state, env):
             + "\nhw.ramSize=1536\nhw.cpu.ncore=2\nhw.lcd.width=1080\nhw.lcd.height=1920\nhw.lcd.density=420\n"
             + "hw.keyboard=yes\nhw.audioInput=no\nhw.audioOutput=no\nhw.gps=no\nshowDeviceFrame=no\n")
         with (state / "adb.private.log").open("xb") as log:
-            adb_server = ACTIVE.spawn([str(adb), "-L", "tcp:127.0.0.1:5037", "nodaemon", "server"],
+            adb_server = ACTIVE.spawn([str(adb), "-L", "tcp:localhost:5037", "nodaemon", "server"],
                                           env=env, stdout=log, stderr=log)
         with (state / "emulator.private.log").open("xb") as log:
             emulator = ACTIVE.spawn([str(tools / "sdk/emulator/emulator"), "-avd", "trial", "-port", "5554",

@@ -240,11 +240,11 @@ python3 -B -m unittest discover -s integrations/dps-native -p 'test_*.py' -v
 git diff --check
 ```
 
-These pass for the current authored correction: source bindings plus 66 inert
+These pass for the current authored correction: source bindings plus 69 inert
 tests (seven Python/Git/archive preparation tests, six lifetime orchestration
 shims, 18 KVM/phase/input-file shims, eight baseline-diagnostic shims, and nine
-synthetic firewall JSON tests, eight offline-failure diagnostic tests, and ten
-emulator-observation tests).
+synthetic firewall JSON tests, eight offline-failure diagnostic tests, and 13
+emulator-observation/listener tests).
 The shims cover deferred signal delivery until child ownership is registered,
 unblocked child signals without a pre-exec hook, repeated INT/TERM deadlines,
 original-failure precedence, honest incomplete cleanup/state preservation,
@@ -715,7 +715,7 @@ This is a possible timestamp-update mechanism; no recorded runner versions or
 uevents bind it to this run. No upstream code is imported, and this research
 grants no baseline-normalization authority. All KVM/IPv6 comparisons remain exact.
 
-The current candidate adds bounded observations only. It preserves short-circuit
+The observation slice added bounded observations only. It preserved short-circuit
 emulator-poll, ADB-poll and deadline order, the 180-second limit, command arguments,
 poll retry/sleep behavior and workload success conditions. Before cleanup it
 records the exact terminal predicate reason, which statuses/deadline were actually
@@ -755,8 +755,64 @@ Hard kill or blocked I/O can still prevent receipts; missing data cannot prove
 successful capture. Ten new inert tests cover predicate independence, not-ready
 continuation, primary/cleanup separation, index proof, terminal-source gating,
 read races, FD/type/size bounds, window coverage/privacy and error precedence.
-This candidate is **unrun on a hosted runner**. It establishes no emulator boot,
+At authorship this observation slice was **unrun on a hosted runner**. Its later
+failed hosted attempt is preserved below; it establishes no emulator boot,
 installed Android/JNI, sensor or physical-positioning acceptance.
+
+### ADB listener correction and preserved abort
+
+Actual run [39682806204](https://github.com/VOLPAROSSA/volparossa-map/actions/runs/39682806204)
+on exact source `e09f99257ecb99a8ca1d2f6fabc13a801bceb713` passed public acquisition/build
+and offline rebuilding, then failed `EMULATOR_BOOT`. The boot receipt records
+`ADB_SERVER_EXITED`, ADB return code `-6`, the emulator still running at its poll,
+one attempted not-ready poll and 1,202 ms elapsed; the deadline was not observed.
+The complete 152-byte ADB log fingerprint is
+`bf89cd60885cd8c3a6ef0c3c304a9c0616795b836bd034b3521d2954eddb43a4`.
+It matched none of the original finite markers; its raw text was not retained.
+Neither that size nor SIGABRT identifies its historical cause. Original artifact
+`12385241545` is 83,919 bytes, SHA256
+`1b681a111186a855b4ee4291386b86b9212d156fd8bef8ef5b5997f7dfc44e6f`;
+the 78,533-byte original run log has SHA256
+`d4f0c3526a90001926885e64eb62cd711a294701e576f4c786641a2eafea2cbf`.
+
+The archived tool pin is platform-tools **37.0.1**, not 36.0.2; the source receipt
+binds the 9,054,187-byte archive and SHA1 `477254aa5f903c15cf51001717bdf347fb6b53e0`.
+There is no separate runtime `adb version` receipt or verified archive-to-AOSP
+source-commit identity. Immutable AOSP commit
+`9ccdca1b66d21a1bbfec0d3dd522391866c90cee` supplies a source-grounded rationale:
+[`socket_spec.cpp`](https://android.googlesource.com/platform/packages/modules/adb/+/9ccdca1b66d21a1bbfec0d3dd522391866c90cee/socket_spec.cpp#369)
+rejects explicit IPv4 listener host `127.0.0.1`, while `localhost` selects its
+dedicated loopback implementation. That implementation constructs loopback socket
+addresses directly, without DNS lookup
+([`sysdeps/posix/network.cpp`](https://android.googlesource.com/platform/packages/modules/adb/+/9ccdca1b66d21a1bbfec0d3dd522391866c90cee/sysdeps/posix/network.cpp#122)).
+[`client/main.cpp`](https://android.googlesource.com/platform/packages/modules/adb/+/9ccdca1b66d21a1bbfec0d3dd522391866c90cee/client/main.cpp#161)
+reports exhausted listener startup as fatal. These are Apache-2.0 upstream source
+references; no upstream code is imported, and they do not prove this archive's
+implementation or the previous abort's cause.
+
+The new correction changes only the server's `-L` argument from
+`tcp:127.0.0.1:5037` to `tcp:localhost:5037`. Client arguments and every other launch
+argument remain unchanged. The existing private namespace/only-loopback guard,
+loopback activation and permanent credential/capability drop remain in force;
+no DNS configuration, external interface or host configuration is enabled.
+The existing terminal classifier adds only exact case-sensitive literals for
+`ADB_LISTEN_HOST_UNSUPPORTED` and `ADB_SMARTSOCKET_LISTENER_FATAL`. Matches are
+observations, never authoritative causes; no match leaves the cause unknown.
+Three added inert tests check the mocked launch/client arguments, raw LF/CRLF
+fixtures, changed case, truncation and unrelated near-matches. Capture mechanics,
+receipt fields/bounds, deadlines, signals, KVM/IPv6 comparisons and cleanup are
+unchanged. This correction has **not run on a hosted runner**.
+
+The failed actual attempt separately reported `PROCESS_GROUP_DRAIN` at reverse
+ownership index 0 (the emulator group), with cached emulator status `-9` and ADB
+status `-6`. Its inner cleanup remained unconfirmed; those observations do not
+prove what persisted in the group. Outer groups drained and private state was
+removed, but host-baseline acceptance failed for raw IPv6 and KVM timestamps.
+Firewall configuration matched with counter changes. Those unresolved failures
+remain failures. The emulator phase's `device_unchanged=false` is still its
+unreached success-only comparison's default, not an observed mismatch. Both
+synthetic cancellation controls passed; no Android/JNI or positioning acceptance
+follows from these results.
 
 ### Catchable cancellation requirements and scoped hosted proof
 

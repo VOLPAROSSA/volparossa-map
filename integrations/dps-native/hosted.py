@@ -749,9 +749,56 @@ def failure_code(error):
     return value if isinstance(value, str) and re.fullmatch("[A-Z_]+", value) else type(error).__name__
 
 
+def baseline_diagnostic(before, after, capture_error):
+    """Only fixed metadata/hash snapshots; never raw host configuration or errors."""
+    components = ("netns", "routes", "ipv6_routes", "resolver", "firewall", "credentials", "kvm")
+    require(capture_error in (None, "BASELINE_NOT_CAPTURED", "BASELINE_BEFORE_UNAVAILABLE", "BASELINE_CAPTURE_FAILED"),
+            "BASELINE_CAPTURE_CODE")
+    result = dict(schema=1, before=None, after=None, changed_components=None,
+                  capture_error=capture_error, diagnostic_error=None)
+
+    def integer(value):
+        return type(value) is int and 0 <= value < 2**64
+
+    def fingerprint(value):
+        return (type(value) is dict and set(value) == {"bytes", "sha256"} and integer(value["bytes"])
+                and type(value["sha256"]) is str and re.fullmatch("[0-9a-f]{64}", value["sha256"]) is not None)
+
+    def snapshot(value):
+        if type(value) is not dict or set(value) != set(components): return False
+        if type(value["netns"]) is not str or re.fullmatch(r"net:\[[0-9]{1,20}\]", value["netns"]) is None: return False
+        if not all(fingerprint(value[key]) for key in components[1:5]): return False
+        creds = value["credentials"]
+        if type(creds) is not dict or set(creds) != {"uid", "gid", "groups"}: return False
+        if not all(type(creds[key]) is list and len(creds[key]) == 3
+                   and all(integer(item) for item in creds[key]) for key in ("uid", "gid")): return False
+        if (type(creds["groups"]) is not list or len(creds["groups"]) > 64
+                or not all(integer(item) for item in creds["groups"])
+                or creds["groups"] != sorted(set(creds["groups"]))): return False
+        kvm = value["kvm"]
+        if type(kvm) is not dict or set(kvm) != {"device", "acl", "kvm_gid"}: return False
+        device = kvm["device"]
+        if (type(device) is not dict or set(device) != {"dev", "ino", "rdev", "mode", "uid", "gid", "nlink", "mtime_ns", "ctime_ns"}
+                or not all(type(item) is int and -2**63 <= item < 2**64 for item in device.values())): return False
+        if not integer(kvm["kvm_gid"]) or kvm["kvm_gid"] == 0 or kvm["kvm_gid"] != device["gid"]: return False
+        acl = kvm["acl"]
+        return (type(acl) is dict and ((set(acl) == {"present"} and acl["present"] is False) or (
+            set(acl) == {"present", "bytes", "sha256"} and acl["present"] is True
+            and fingerprint({key: acl[key] for key in ("bytes", "sha256")}))))
+
+    for name, value in (("before", before), ("after", after)):
+        if value is None: continue
+        if snapshot(value): result[name] = value
+        else: result["diagnostic_error"] = "BASELINE_METADATA_SHAPE"
+    if result["before"] is not None and result["after"] is not None:
+        result["changed_components"] = [key for key in components if before[key] != after[key]]
+    return result
+
+
 def finalize(state, evidence, before, complete, original, control_mode=None):
     """Best-effort bounded finalization; original failure always keeps precedence."""
     errors, removed, unchanged, drained = [], False, None, False
+    after, capture_error = None, "BASELINE_NOT_CAPTURED"
     result = dict(schema=2, source=os.environ.get("GITHUB_SHA"), success=False,
                   primary_failure=failure_code(original), synthetic_only=True, hardware_acceptance=False)
     try:
@@ -766,9 +813,14 @@ def finalize(state, evidence, before, complete, original, control_mode=None):
             ACTIVE.drain_all()
             drained = not ACTIVE.owned
             try:
-                unchanged = before is not None and baseline() == before
+                if before is None:
+                    unchanged, capture_error = False, "BASELINE_BEFORE_UNAVAILABLE"
+                else:
+                    after = baseline()
+                    unchanged, capture_error = after == before, None
             except BaseException as error:
                 errors.append(failure_code(error)); unchanged = False
+                capture_error = "BASELINE_CAPTURE_FAILED"
             if not unchanged:
                 errors.append("HOST_BASELINE_UNCONFIRMED")
             for path in state.glob("*.json"):
@@ -797,6 +849,12 @@ def finalize(state, evidence, before, complete, original, control_mode=None):
             success=complete and unchanged is True and drained and removed and not errors
                     and not ACTIVE.cleanup_errors and ACTIVE.first_signal is None)
         try:
+            result["baseline_comparison"] = baseline_diagnostic(before, after, capture_error)
+            # Keep the existing receipt bounded even at the diagnostic limit.
+            # Omitting diagnostic snapshots never changes the equality verdict.
+            if len((json.dumps(result, indent=2, sort_keys=True) + "\n").encode()) > 16384:
+                result["baseline_comparison"].update(before=None, after=None, diagnostic_error="BASELINE_RECEIPT_BOUND")
+            require(len((json.dumps(result, indent=2, sort_keys=True) + "\n").encode()) <= 16384, "BASELINE_RECEIPT_BOUND")
             evidence.mkdir(parents=True, exist_ok=True)
             save(evidence / "result.json", result)
         except BaseException as error:

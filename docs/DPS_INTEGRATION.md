@@ -240,9 +240,9 @@ python3 -B -m unittest discover -s integrations/dps-native -p 'test_*.py' -v
 git diff --check
 ```
 
-These pass for the current authored correction: source bindings plus 28 inert
+These pass for the current authored correction: source bindings plus 35 inert
 tests (seven Python/Git/archive preparation tests, six lifetime orchestration
-shims, and 15 KVM/phase/input-file shims).
+shims, 15 KVM/phase/input-file shims, and seven baseline-diagnostic shims).
 The shims cover deferred signal delivery until child ownership is registered,
 unblocked child signals without a pre-exec hook, repeated INT/TERM deadlines,
 original-failure precedence, honest incomplete cleanup/state preservation,
@@ -252,7 +252,7 @@ make no privileged call; passing them is not cancellation runtime acceptance. Th
 they are never passed to JNI and never represented as real Protobuf goldens.
 No Rust, native, Java, Gradle, SDK, Node, emulator or hardware execution occurred
 on the development host. The published candidate's failed hosted attempt is
-preserved below; the current four-file KVM correction has not been dispatched.
+preserved below; the current three-file diagnostic correction has not been dispatched.
 
 ## Hosted candidate and evidence boundaries
 
@@ -320,7 +320,7 @@ Unconfirmed cleanup preserves remaining state for disposable-runner teardown. No
 may prevent final receipts; the disposable runner teardown is then the external
 cleanup boundary and no completed cleanup claim is accepted.
 
-### Preserved failed attempt and KVM correction: unrun
+### Preserved first failed attempt and KVM correction
 
 Published Map source `3abb91fa56a5bdf1b27337c689a409986caed793`, tree
 `58fa25a8e89c6d08897d4ba9c06eaf35c66dee85`, passed source run `39664119379`
@@ -413,10 +413,61 @@ ordering, bounded non-symlink bootstrap inputs, and nonblocking FIFO type reject
 before input reads or receipt writes. The FIFO cases mock opens and stat results;
 they create no FIFO or privileged process. Local temporary-file tests
 exercise only ordinary owned files. No local device, privilege, namespace, SDK,
-VM, OS-signal or hardware trial occurred. Actual KVM delegation, sudo compatibility,
-phase cleanup and all eight Android tests remain **unrun** for this correction.
+VM, OS-signal or hardware trial occurred on the development host. The subsequently
+published KVM query evidence and failed cancellation attempt are recorded below;
+all eight Android tests remain **unrun**.
 
-### Catchable cancellation candidate: unrun
+### Actual KVM query and cancellation baseline failure
+
+Published source `c479fbd2fd6be9e039008965c2618a481a815bf1` passed source checks
+with 28 inert tests. Actual hosted run
+[39669351913](https://github.com/VOLPAROSSA/volparossa-map/actions/runs/39669351913)
+failed before acquisition, builds or Android execution with
+`CANCELLATION_CONTROL_FAILED`. Original artifact `12377934443.zip` is 5,544 bytes,
+SHA-256 `620b9a12f0435e894a59d754279f36ad011d717060b0ebe1fd8241e7d1bdb3a4`;
+the original log SHA-256 is
+`8498bb8576eafacdc5dea7f1f8a95b0649857b331d495e34ad4cb20ecd6557f6`.
+
+The actual query receipt reports API `12`, UID/GID `1001`, sole supplementary
+group `993`, zero effective/permitted/ambient capabilities, a closed query FD,
+unchanged device, and a drained supervisor. This proves the bounded KVM query;
+it creates no VM and establishes no emulator, Android or JNI acceptance.
+Both cancellation receipts report two signals, drained registered groups and
+removed owned state. Term-first reports unchanged baseline. INT-to-TERM and the
+outer finalizer report `HOST_BASELINE_UNCONFIRMED`; complete cancellation-control
+acceptance was not achieved. The INT-to-TERM independent PID-extinction result
+was not retained. Only the outer before-snapshot survived, so neither the changed
+component nor a benign-versus-configuration-change explanation can be recovered.
+
+The raw inputs can include live state: nft counters count packets/bytes, and the
+Linux IPv6 proc renderer includes a live route reference count. These are possible
+comparison-volatility mechanisms, **not established causes of this run**. See the
+[official nft manual](https://netfilter.org/projects/nftables/manpage.html) and
+[Linux IPv6 renderer](https://github.com/torvalds/linux/blob/v6.8/net/ipv6/ip6_fib.c#L2338-L2365).
+
+The current diagnostic-only candidate retains the already collected before/after
+snapshots in each existing finalizer receipt, plus a fixed seven-component changed
+list (`netns`, `routes`, `ipv6_routes`, `resolver`, `firewall`, `credentials`, `kvm`).
+Snapshots accept only fixed metadata and hash/size fields; raw route, DNS and nft
+contents and arbitrary error text are excluded. A closed capture code distinguishes
+not reached, absent before-snapshot, and capture failure. Invalid metadata is omitted
+with a diagnostic shape code. The whole result receipt is bounded to 16 KiB; if
+diagnostics exceed that budget, their snapshots are omitted with a bound code.
+If the existing fields alone cannot fit, no oversized receipt is written and the
+existing failure-precedence rules apply. Nested control result receipts follow
+the existing retention path before private-state removal.
+
+Exact baseline equality and every existing acceptance condition remain required.
+This candidate adds no host command, second snapshot read, retry, normalization,
+baseline replacement, signal handler or cleanup-time extension. Seven inert tests
+cover matching snapshots, each component changing, capture failure, an unavailable
+before-snapshot, rejection of raw/unknown metadata, the whole-receipt byte bound,
+and nested retention. They establish receipt orchestration only. The diagnostic
+candidate is **unrun on a hosted runner**; the next actual failure must identify
+its changed component before any narrower configuration-versus-counter comparison
+can be considered.
+
+### Catchable cancellation requirements: acceptance incomplete
 
 Independent source review found that the first candidate lacked catchable TERM
 handling, so its `finally` blocks did not establish cancellation cleanup. The
@@ -450,8 +501,8 @@ to exercise that escalation. Acceptance requires both signals recorded, original
 interruption retained, every tracked process extinct, registered groups drained,
 private state removed, unchanged host baselines and a complete receipt. Wrapper
 exit status alone is insufficient. These controls execute only on the approved
-reviewed hosted runner; they have **not been run**. No cancellation acceptance is
-claimed by their source or the local shims.
+reviewed hosted runner. Their failed actual attempt is retained above; complete
+cancellation acceptance remains open. Source checks and local shims do not supply it.
 
 SIGKILL, blocked I/O, workflow killtree and runner destruction can prevent both
 cleanup and final receipts. Unconfirmed private state is preserved until the

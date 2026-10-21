@@ -243,6 +243,123 @@ class LifetimeShimTests(unittest.TestCase):
             spawn.assert_not_called()
 
 
+class BaselineDiagnosticShimTests(unittest.TestCase):
+    """Fixed inert snapshots and ordinary owned files; no host baseline reads."""
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.life = H.Lifetime()
+        self.enterContext(patch.object(H, "ACTIVE", self.life))
+        self.enterContext(patch.object(H.signal, "setitimer"))
+        self.enterContext(patch.object(H.signal, "getitimer", return_value=(0.0, 0.0)))
+        self.before = dict(netns="net:[123]", routes=dict(bytes=896, sha256="a" * 64),
+            ipv6_routes=dict(bytes=900, sha256="a" * 64), resolver=dict(bytes=970, sha256="a" * 64),
+            firewall=dict(bytes=2804, sha256="a" * 64),
+            credentials=dict(uid=[1001] * 3, gid=[1001] * 3, groups=[4, 1001]),
+            kvm=dict(kvm_gid=993, acl=dict(present=False), device=dict(dev=6, ino=435, rdev=2792,
+                mode=8624, uid=0, gid=993, nlink=1, mtime_ns=123, ctime_ns=123)))
+
+    def owned(self, name):
+        state = self.root / name; state.mkdir(); (state / "private").write_bytes(b"inert")
+        return state, self.root / (name + "-evidence")
+
+    def test_matching_snapshots_preserve_success_and_capture_exactly_once(self):
+        state, evidence = self.owned("match")
+        with patch.object(self.life, "drain_all"), patch.object(H, "baseline", return_value=copy.deepcopy(self.before)) as capture:
+            result = H.finalize(state, evidence, self.before, True, None)
+        capture.assert_called_once_with()
+        self.assertTrue(result["success"]); self.assertFalse(state.exists())
+        diagnostic = result["baseline_comparison"]
+        self.assertEqual(diagnostic, dict(schema=1, before=self.before, after=self.before,
+            changed_components=[], capture_error=None, diagnostic_error=None))
+        self.assertEqual(json.loads((evidence / "result.json").read_text()), result)
+
+    def test_every_component_difference_fails_exact_comparison_and_retains_both(self):
+        for component in self.before:
+            with self.subTest(component=component):
+                after = copy.deepcopy(self.before)
+                if component == "netns": after[component] = "net:[124]"
+                elif component == "credentials": after[component]["groups"] = [1001]
+                elif component == "kvm": after[component]["device"]["ctime_ns"] += 1
+                else: after[component]["sha256"] = "b" * 64
+                state, evidence = self.owned(component)
+                with patch.object(self.life, "drain_all"), patch.object(H, "baseline", return_value=after) as capture:
+                    result = H.finalize(state, evidence, self.before, True, ValueError("ORIGINAL_FAILURE"))
+                capture.assert_called_once_with()
+                self.assertFalse(result["success"]); self.assertFalse(result["host_routes_dns_firewall_unchanged"])
+                self.assertEqual(result["primary_failure"], "ORIGINAL_FAILURE")
+                self.assertEqual(result["cleanup_errors"], ["HOST_BASELINE_UNCONFIRMED"])
+                self.assertEqual(result["baseline_comparison"]["changed_components"], [component])
+                self.assertEqual(result["baseline_comparison"]["before"], self.before)
+                self.assertEqual(result["baseline_comparison"]["after"], after)
+                self.assertTrue(result["registered_groups_drained"]); self.assertFalse(state.exists())
+
+    def test_capture_failure_retains_closed_code_and_original_failure(self):
+        state, evidence = self.owned("capture-failure")
+        with patch.object(self.life, "drain_all"), patch.object(H, "baseline", side_effect=OSError("private error detail")) as capture:
+            result = H.finalize(state, evidence, self.before, False, ValueError("ORIGINAL_FAILURE"))
+        capture.assert_called_once_with()
+        self.assertEqual(result["cleanup_errors"], ["OSError", "HOST_BASELINE_UNCONFIRMED"])
+        self.assertEqual(result["primary_failure"], "ORIGINAL_FAILURE")
+        self.assertEqual(result["baseline_comparison"], dict(schema=1, before=self.before, after=None,
+            changed_components=None, capture_error="BASELINE_CAPTURE_FAILED", diagnostic_error=None))
+        self.assertNotIn("private error detail", (evidence / "result.json").read_text())
+        self.assertFalse(state.exists()); self.assertFalse(result["success"])
+
+    def test_unavailable_before_does_not_add_a_host_read(self):
+        state, evidence = self.owned("no-before")
+        with patch.object(self.life, "drain_all"), patch.object(H, "baseline") as capture:
+            result = H.finalize(state, evidence, None, False, ValueError("ORIGINAL_FAILURE"))
+        capture.assert_not_called()
+        self.assertEqual(result["baseline_comparison"]["capture_error"], "BASELINE_BEFORE_UNAVAILABLE")
+        self.assertIsNone(result["baseline_comparison"]["before"])
+        self.assertIsNone(result["baseline_comparison"]["changed_components"])
+        self.assertFalse(result["success"])
+
+    def test_unknown_or_raw_metadata_is_omitted_without_changing_equality(self):
+        for component in ("raw_routes", "resolver", "credentials", "kvm"):
+            with self.subTest(component=component):
+                malformed = copy.deepcopy(self.before)
+                malformed[component] = "PRIVATE_RAW_CONTENT" * 2000
+                diagnostic = H.baseline_diagnostic(malformed, malformed, None)
+                self.assertEqual(diagnostic["diagnostic_error"], "BASELINE_METADATA_SHAPE")
+                self.assertIsNone(diagnostic["before"]); self.assertIsNone(diagnostic["after"])
+                self.assertNotIn("PRIVATE_RAW_CONTENT", json.dumps(diagnostic))
+        state, evidence = self.owned("malformed")
+        with patch.object(self.life, "drain_all"), patch.object(H, "baseline", return_value=malformed):
+            result = H.finalize(state, evidence, malformed, True, None)
+        self.assertTrue(result["success"]); self.assertTrue(result["host_routes_dns_firewall_unchanged"])
+        self.assertEqual(result["baseline_comparison"]["diagnostic_error"], "BASELINE_METADATA_SHAPE")
+
+    def test_complete_receipt_bound_omits_snapshots_preserving_existing_errors(self):
+        state, evidence = self.owned("bounded")
+        self.life.cleanup_errors = ["X" * 14000]
+        with patch.object(self.life, "drain_all"), patch.object(H, "baseline", return_value=self.before):
+            result = H.finalize(state, evidence, self.before, True, ValueError("ORIGINAL_FAILURE"))
+        self.assertLessEqual((evidence / "result.json").stat().st_size, 16384)
+        self.assertEqual(result["baseline_comparison"]["diagnostic_error"], "BASELINE_RECEIPT_BOUND")
+        self.assertIsNone(result["baseline_comparison"]["before"]); self.assertIsNone(result["baseline_comparison"]["after"])
+        self.assertEqual(result["cleanup_errors"], ["X" * 14000])
+        self.assertEqual(result["primary_failure"], "ORIGINAL_FAILURE")
+        self.assertTrue(result["host_routes_dns_firewall_unchanged"]); self.assertFalse(result["success"])
+
+    def test_existing_nested_copy_retains_both_control_diagnostics_after_removal(self):
+        state, evidence = self.owned("outer")
+        nested = {}
+        for mode in ("term-first", "int-term"):
+            case = state / ("control-" + mode); case.mkdir()
+            with patch.object(self.life, "drain_all"), patch.object(H, "baseline", return_value=self.before):
+                nested[mode] = H.finalize(case, state / ("control-evidence-" + mode), self.before,
+                    False, H.Interrupted("HOSTED_INTERRUPTED"))
+        with patch.object(self.life, "drain_all"), patch.object(H, "baseline", return_value=self.before):
+            result = H.finalize(state, evidence, self.before, True, None)
+        self.assertTrue(result["success"]); self.assertFalse(state.exists())
+        for mode in nested:
+            self.assertEqual(json.loads((evidence / ("control-" + mode + "-result.json")).read_text()), nested[mode])
+            self.assertEqual(nested[mode]["baseline_comparison"]["before"], self.before)
+            self.assertEqual(nested[mode]["baseline_comparison"]["after"], self.before)
+
+
 class KvmShimTests(unittest.TestCase):
     """No local KVM device, ioctl, credentials, namespace, signal or workload execution."""
     def setUp(self):

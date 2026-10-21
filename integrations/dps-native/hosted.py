@@ -759,12 +759,149 @@ def offline_build(state, env):
     save(state / "offline-apk.json", dict(source=env["GITHUB_SHA"], apk=digest(apks[0].read_bytes())))
 
 
+def emulator_boot_observation(emulator, adb_server, stop, attempt):
+    """Preserve the boot predicate's short-circuit order; export no process ID."""
+    observation = dict(reason=None, emulator_observed=True, emulator_returncode=None,
+        adb_observed=False, adb_returncode=None, deadline_observed=False, deadline_reached=None,
+        attempts=min(attempt, 255), attempts_truncated=attempt > 255, elapsed_ms=None, elapsed_truncated=False)
+    def status(value):
+        return value if type(value) is int and -255 <= value <= 255 else None
+    emulator_status = emulator.poll()
+    observation["emulator_returncode"] = status(emulator_status)
+    if emulator_status is not None:
+        observation["reason"] = "EMULATOR_EXITED"
+    else:
+        adb_status = adb_server.poll()
+        observation.update(adb_observed=True, adb_returncode=status(adb_status))
+        if adb_status is not None:
+            observation["reason"] = "ADB_SERVER_EXITED"
+        else:
+            now = time.monotonic()
+            within_deadline = now < stop
+            observation.update(deadline_observed=True, deadline_reached=not within_deadline)
+            if not within_deadline: observation["reason"] = "BOOT_DEADLINE"
+    if not observation["deadline_observed"]: now = time.monotonic()
+    elapsed = max(0, int((now - (stop - 180)) * 1000))
+    observation.update(elapsed_ms=min(elapsed, 420000), elapsed_truncated=elapsed > 420000)
+    return observation
+
+
+def emulator_cleanup_observation(before, remaining, emulator, adb_server, stage, error):
+    """Observe existing drain bookkeeping without adding waits, polls or signals."""
+    result = dict(stage=stage if stage in {"ENTER_CLEANUP", "DRAIN_GROUPS", "REMOVE_AVD", "REMOVE_ANDROID_HOME", "COMPLETE"} else "UNKNOWN",
+                  code=None, order_proven=False, failed_group_index=None,
+                  remaining_roles=[], observation_error=None)
+    try:
+        code = failure_code(error)
+        result["code"] = code if code in {None, "PROCESS_GROUP_DRAIN", "CLEANUP_DEADLINE", "ValueError",
+            "TimeoutExpired", "CalledProcessError", "OSError", "Interrupted"} else "OTHER_CLEANUP_FAILURE"
+        if len(before) > 8 or len(remaining) > 8:
+            result["observation_error"] = "OWNERSHIP_OBSERVATION_BOUND"
+            return result
+        ordered, live = [id(child) for child in before], [id(child) for child in remaining]
+        completed = 0
+        while completed < len(ordered) and ordered[completed] not in live: completed += 1
+        proven = (len(ordered) == len(set(ordered)) and len(live) == len(set(live))
+                  and live == list(reversed(ordered[completed:])))
+        result["order_proven"] = proven
+        if proven and stage == "DRAIN_GROUPS" and code == "PROCESS_GROUP_DRAIN" and completed < len(ordered):
+            result["failed_group_index"] = completed
+        for child in remaining:
+            value = child.returncode
+            result["remaining_roles"].append(dict(
+                role="emulator" if child is emulator else "adb_server" if child is adb_server else "other_registered",
+                cached_returncode=value if type(value) is int and -255 <= value <= 255 else None))
+    except BaseException:
+        result.update(order_proven=False, failed_group_index=None, remaining_roles=[], observation_error="OWNERSHIP_OBSERVATION_FAILED")
+    return result
+
+
+def emulator_failure_diagnostic(state, source):
+    """Observe two fixed logs only after their enclosing namespace drained."""
+    result = dict(schema=1, source=None, phase="emulator", namespace_exit=None, capture_error=None, logs=[])
+    descriptors = []
+    codes = {"EMULATOR_DIAGNOSTIC_SOURCE", "EMULATOR_DIAGNOSTIC_STATE", "EMULATOR_DIAGNOSTIC_FILE",
+             "EMULATOR_DIAGNOSTIC_CHANGED", "EMULATOR_DIAGNOSTIC_SUMMARY", "EMULATOR_DIAGNOSTIC_NOT_DRAINED"}
+    def closed_error(error):
+        if isinstance(error, CleanupDeadline): return "EMULATOR_DIAGNOSTIC_DEADLINE"
+        if isinstance(error, OSError): return "EMULATOR_DIAGNOSTIC_IO"
+        value = error.args[0] if error.args else None
+        return value if type(value) is str and value in codes else "EMULATOR_DIAGNOSTIC_FAILED"
+    try:
+        with ACTIVE.cleanup():
+            try:
+                require(type(source) is str and re.fullmatch("[0-9a-f]{40}", source), "EMULATOR_DIAGNOSTIC_SOURCE")
+                result["source"] = source
+                with ACTIVE.registration():
+                    directory = os.open(state, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW)
+                    descriptors.append(directory)
+                owner = os.fstat(directory)
+                require(stat.S_ISDIR(owner.st_mode) and stat.S_IMODE(owner.st_mode) == 0o700
+                        and owner.st_uid == os.getuid() == os.geteuid() != 0 and owner.st_gid == os.getgid(), "EMULATOR_DIAGNOSTIC_STATE")
+                def owned_file(name, maximum):
+                    with ACTIVE.registration():
+                        fd = os.open(name, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+                        descriptors.append(fd)
+                    info = os.fstat(fd)
+                    require(stat.S_ISREG(info.st_mode) and stat.S_IMODE(info.st_mode) == 0o600
+                            and info.st_uid == owner.st_uid and info.st_gid == owner.st_gid and info.st_nlink == 1
+                            and 0 <= info.st_size <= maximum, "EMULATOR_DIAGNOSTIC_FILE")
+                    return fd, info
+                def stable(fd, info):
+                    after = os.fstat(fd)
+                    require(device_identity(after) == device_identity(info) and after.st_size == info.st_size,
+                            "EMULATOR_DIAGNOSTIC_CHANGED")
+                def summary_object(pairs):
+                    require(len(pairs) == len(dict(pairs)), "EMULATOR_DIAGNOSTIC_SUMMARY")
+                    return dict(pairs)
+                fd, info = owned_file("emulator-namespace.json", 4096)
+                raw = os.read(fd, info.st_size)
+                require(len(raw) == info.st_size, "EMULATOR_DIAGNOSTIC_CHANGED"); stable(fd, info)
+                try: summary = json.loads(raw, object_pairs_hook=summary_object)
+                except (ValueError, UnicodeError, RecursionError): raise ValueError("EMULATOR_DIAGNOSTIC_SUMMARY") from None
+                require(type(summary) is dict and set(summary) == {"exit", "peak_observed_rss", "wall_bound_seconds",
+                    "owned_process_group_drained", "signal_count", "cleanup_error"}, "EMULATOR_DIAGNOSTIC_SUMMARY")
+                require(summary["owned_process_group_drained"] is True and summary["cleanup_error"] is None and not ACTIVE.owned
+                        and type(summary["exit"]) is int and -255 <= summary["exit"] <= 255 and summary["exit"] != 0,
+                        "EMULATOR_DIAGNOSTIC_NOT_DRAINED")
+                result["namespace_exit"] = summary["exit"]
+                markers = {"ERROR_TOKEN": (b"ERROR",), "FATAL_TOKEN": (b"FATAL",), "KVM_TOKEN": (b"KVM",),
+                           "AVD_TOKEN": (b"AVD",), "VULKAN_TOKEN": (b"Vulkan", b"VULKAN"), "QT_PLATFORM_TOKEN": (b"Qt platform",)}
+                for role, name in (("emulator", "emulator.private.log"), ("adb_server", "adb.private.log")):
+                    fd, info = owned_file(name, 64 * 1024**2)
+                    size, samples, windows = info.st_size, [], []
+                    for offset, length in [(0, min(size, 16384))] + (
+                            [(max(16384, size - 16384), min(size - 16384, 16384))] if size > 16384 else []):
+                        os.lseek(fd, offset, os.SEEK_SET); sample = os.read(fd, length)
+                        require(len(sample) == length, "EMULATOR_DIAGNOSTIC_CHANGED")
+                        samples.append(sample); windows.append(dict(offset=offset, **digest(sample)))
+                    stable(fd, info)
+                    complete = size <= 32768
+                    searchable = [b"".join(samples)] if complete else samples
+                    result["logs"].append(dict(role=role, coverage="COMPLETE" if complete else "PREFIX_TAIL",
+                        log_bytes=size, read_bytes=sum(len(sample) for sample in samples), windows=windows,
+                        complete_log_fingerprint=digest(searchable[0]) if complete else None,
+                        observed_markers=[key for key, phrases in markers.items()
+                            if any(phrase in sample for sample in searchable for phrase in phrases)]))
+            except BaseException as error:
+                result["capture_error"] = closed_error(error)
+            finally:
+                for fd in reversed(descriptors):
+                    try: os.close(fd)
+                    except BaseException:
+                        if result["capture_error"] is None: result["capture_error"] = "EMULATOR_DIAGNOSTIC_CLOSE"
+    except BaseException as error:
+        if result["capture_error"] is None: result["capture_error"] = closed_error(error)
+    return result
+
+
 def emulator_trial(state, env):
     tools, android = state / "tools", state / "prepared/android"
     success, cleanup = False, False
     adb = tools / "sdk/platform-tools/adb"
     emulator = None
     adb_server = None
+    boot_observation, nonfatal_poll = None, None
     def command(label, *args, seconds=30):
         return run(label, [adb, "-s", SERIAL, *args], state, env, seconds=seconds)
     try:
@@ -788,13 +925,16 @@ def emulator_trial(state, env):
         stop = time.monotonic() + 180
         attempt = 0
         while True:
-            require(emulator.poll() is None and adb_server.poll() is None and time.monotonic() < stop, "EMULATOR_BOOT")
+            boot_observation = emulator_boot_observation(emulator, adb_server, stop, attempt)
+            require(boot_observation["reason"] is None, "EMULATOR_BOOT")
             attempt += 1
             try:
                 if command("boot-" + str(attempt), "shell", "getprop", "sys.boot_completed", seconds=3).strip() == b"1":
                     break
-            except ValueError:
-                pass
+            except ValueError as error:
+                code = failure_code(error)
+                nonfatal_poll = dict(attempt=min(attempt, 255), attempts_truncated=attempt > 255,
+                    code=code if code in {"STEP_RESOURCE_BOUND", "PROCESS_GROUP_DRAIN"} else "VALUE_ERROR")
             time.sleep(1)
         require(command("guest-api", "shell", "getprop", "ro.build.version.sdk").strip() == b"36", "GUEST_API")
         require(command("guest-abi", "shell", "getprop", "ro.product.cpu.abi").strip() == b"x86_64", "GUEST_ABI")
@@ -819,21 +959,32 @@ def emulator_trial(state, env):
         success = True
     finally:
         original, cleanup_error = sys.exc_info()[1], None
+        cleanup_stage, prior_owned = "ENTER_CLEANUP", []
         try:
             with ACTIVE.cleanup():
+                cleanup_stage, prior_owned = "DRAIN_GROUPS", list(reversed(ACTIVE.owned))
                 ACTIVE.drain_all()
                 for name in ("avd", "android-home"):
+                    cleanup_stage = "REMOVE_AVD" if name == "avd" else "REMOVE_ANDROID_HOME"
                     path = state / name
                     if path.exists():
                         shutil.rmtree(path)
+                cleanup_stage = "COMPLETE"
         except BaseException as error:
             cleanup_error = error
         try:
             with ACTIVE.cleanup():
-                save(state / "namespace-cleanup.json", dict(direct_children_reaped=not ACTIVE.owned,
+                receipt = dict(direct_children_reaped=not ACTIVE.owned,
                     avd_removed=not (state / "avd").exists(), android_home_removed=not (state / "android-home").exists(),
                     namespace_parent_must_confirm_exit=True, trial_returned=success, signal_count=ACTIVE.signal_count,
-                    cleanup_error=None if cleanup_error is None else type(cleanup_error).__name__))
+                    cleanup_error=None if cleanup_error is None else type(cleanup_error).__name__,
+                    source=env["GITHUB_SHA"], boot_observation=boot_observation, last_nonfatal_boot_poll=nonfatal_poll,
+                    primary_boot_failure=isinstance(original, ValueError) and original.args == ("EMULATOR_BOOT",),
+                    cleanup_observation=emulator_cleanup_observation(prior_owned, list(ACTIVE.owned), emulator, adb_server,
+                        cleanup_stage, cleanup_error))
+                require(len((json.dumps(receipt, indent=2, sort_keys=True) + "\n").encode()) <= 16384,
+                        "EMULATOR_OBSERVATION_RECEIPT_BOUND")
+                save(state / "namespace-cleanup.json", receipt)
         except BaseException as error:
             ACTIVE.cleanup_errors.append(type(error).__name__)
             if original is None and cleanup_error is None:
@@ -967,7 +1118,19 @@ def run_phase(state, phase, env, seconds):
     with ACTIVE.registration():
         fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600)
         os.close(fd)
-    run(phase + "-namespace", namespace_command("--inside-" + phase, state, seconds - 2), state, env, seconds=seconds)
+    try:
+        run(phase + "-namespace", namespace_command("--inside-" + phase, state, seconds - 2), state, env, seconds=seconds)
+    except BaseException:
+        if phase == "emulator":
+            try:
+                with ACTIVE.cleanup():
+                    diagnostic = emulator_failure_diagnostic(state, env["GITHUB_SHA"])
+                    require(len((json.dumps(diagnostic, indent=2, sort_keys=True) + "\n").encode()) <= 16384,
+                            "EMULATOR_DIAGNOSTIC_RECEIPT_BOUND")
+                    save(state / "emulator-failure-diagnostic.json", diagnostic)
+            except BaseException:
+                pass  # The enclosing namespace failure retains precedence.
+        raise
     directory, original = None, None
     try:
         with ACTIVE.registration():

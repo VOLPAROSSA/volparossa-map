@@ -665,6 +665,214 @@ class OfflineDiagnosticTests(unittest.TestCase):
         self.assertEqual(json.loads((self.root / "offline-apk.json").read_text())["source"], self.source)
 
 
+class EmulatorObservationTests(unittest.TestCase):
+    """Mocked child/clock/drain behavior and inert files only; no emulator runs."""
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.life = H.Lifetime()
+        self.enterContext(patch.object(H, "ACTIVE", self.life))
+        self.enterContext(patch.object(H.signal, "setitimer"))
+        self.enterContext(patch.object(H.signal, "getitimer", return_value=(0.0, 0.0)))
+        self.source = "a" * 40
+
+    def child(self, statuses):
+        child = unittest.mock.Mock(returncode=None)
+        values = iter(statuses)
+        def poll():
+            child.returncode = next(values)
+            return child.returncode
+        child.poll.side_effect = poll
+        return child
+
+    def terminal_files(self, emulator=b"ERROR KVM SECRET_URL https://private.invalid", adb=b"FATAL SECRET_ADB"):
+        summary = dict(exit=1, peak_observed_rss=100, wall_bound_seconds=420,
+            owned_process_group_drained=True, signal_count=0, cleanup_error=None)
+        for name, raw in (("emulator-namespace.json", json.dumps(summary).encode()),
+                          ("emulator.private.log", emulator), ("adb.private.log", adb)):
+            fd = H.os.open(self.root / name, H.os.O_CREAT | H.os.O_TRUNC | H.os.O_WRONLY, 0o600)
+            try: H.os.write(fd, raw)
+            finally: H.os.close(fd)
+        return summary
+
+    def test_boot_predicate_has_independent_shortcircuit_terminal_reasons_and_bounded_values(self):
+        for emulator_status, adb_status, now, reason in ((2, 1, 10, "EMULATOR_EXITED"),
+                (None, 1, 10, "ADB_SERVER_EXITED"), (None, None, 180, "BOOT_DEADLINE"), (None, None, 10, None)):
+            with self.subTest(reason=reason):
+                emulator, adb = self.child([emulator_status]), self.child([adb_status])
+                with patch.object(H.time, "monotonic", return_value=now):
+                    observation = H.emulator_boot_observation(emulator, adb, 180, 1)
+                self.assertEqual(observation["reason"], reason)
+                self.assertEqual(observation["emulator_returncode"], emulator_status)
+                self.assertEqual(observation["adb_observed"], emulator_status is None)
+                self.assertEqual(adb.poll.call_count, int(emulator_status is None))
+                self.assertEqual(observation["deadline_observed"], emulator_status is None and adb_status is None)
+        with patch.object(H.time, "monotonic", return_value=1000):
+            observed = H.emulator_boot_observation(self.child(["PRIVATE_STATUS"]), self.child([None]), 180, 1000)
+        self.assertEqual(observed["attempts"], 255); self.assertTrue(observed["attempts_truncated"])
+        self.assertEqual(observed["elapsed_ms"], 420000); self.assertTrue(observed["elapsed_truncated"])
+        self.assertNotIn("PRIVATE_STATUS", json.dumps(observed))
+
+    def trial_mocks(self, emulator, adb, command, cleanup):
+        children = iter([adb, emulator])
+        def spawn(*args, **kwargs):
+            child = next(children); self.life.owned.append(child); return child
+        with patch.object(self.life, "spawn", side_effect=spawn), patch.object(self.life, "drain_all", side_effect=cleanup), \
+             patch.object(H, "run", side_effect=command), patch.object(H.time, "monotonic", return_value=10), patch.object(H.time, "sleep"):
+            with self.assertRaises(ValueError) as caught:
+                H.emulator_trial(self.root, dict(GITHUB_SHA=self.source))
+        return caught.exception, json.loads((self.root / "namespace-cleanup.json").read_text())
+
+    def test_not_ready_adb_poll_continues_until_ready_and_is_not_later_failure_cause(self):
+        labels = []
+        def command(label, *args, **kwargs):
+            labels.append(label)
+            if label == "boot-1": raise ValueError("STEP_BOOT-1")
+            if label == "boot-2": return b"1\n"
+            if label == "guest-api": raise ValueError("STOP_AT_GUEST_IDENTITY")
+            self.fail("unexpected command")
+        error, receipt = self.trial_mocks(self.child([None, None]), self.child([None, None]), command, self.life.owned.clear)
+        self.assertEqual(str(error), "STOP_AT_GUEST_IDENTITY"); self.assertEqual(labels, ["boot-1", "boot-2", "guest-api"])
+        self.assertFalse(receipt["primary_boot_failure"]); self.assertIsNone(receipt["boot_observation"]["reason"])
+        self.assertEqual(receipt["last_nonfatal_boot_poll"], dict(attempt=1, attempts_truncated=False, code="VALUE_ERROR"))
+        self.assertTrue(receipt["direct_children_reaped"]); self.assertEqual(receipt["cleanup_observation"]["stage"], "COMPLETE")
+
+    def test_primary_boot_failure_and_cleanup_group_failure_remain_separate(self):
+        def command(*args, **kwargs): raise ValueError("STEP_BOOT-1")
+        def cleanup(): raise ValueError("PROCESS_GROUP_DRAIN")
+        error, receipt = self.trial_mocks(self.child([None, 2]), self.child([None]), command, cleanup)
+        self.assertEqual(str(error), "EMULATOR_BOOT"); self.assertTrue(receipt["primary_boot_failure"])
+        self.assertEqual(receipt["boot_observation"]["reason"], "EMULATOR_EXITED")
+        self.assertEqual(receipt["last_nonfatal_boot_poll"]["code"], "VALUE_ERROR")
+        self.assertEqual(receipt["cleanup_error"], "ValueError")
+        diagnostic = receipt["cleanup_observation"]
+        self.assertEqual(diagnostic["stage"], "DRAIN_GROUPS"); self.assertEqual(diagnostic["code"], "PROCESS_GROUP_DRAIN")
+        self.assertTrue(diagnostic["order_proven"]); self.assertEqual(diagnostic["failed_group_index"], 0)
+        self.assertEqual(diagnostic["remaining_roles"][-1], dict(role="emulator", cached_returncode=2))
+        self.assertFalse(receipt["direct_children_reaped"]); self.assertFalse(receipt["avd_removed"])
+        self.assertLessEqual((self.root / "namespace-cleanup.json").stat().st_size, 16384)
+
+    def test_cleanup_index_requires_exact_ownership_prefix_and_known_drain_error(self):
+        emulator, adb = self.child([]), self.child([])
+        error = ValueError("PROCESS_GROUP_DRAIN")
+        known = H.emulator_cleanup_observation([emulator, adb], [adb], emulator, adb, "DRAIN_GROUPS", error)
+        self.assertTrue(known["order_proven"]); self.assertEqual(known["failed_group_index"], 1)
+        for remaining, failure in (([emulator, adb], error), ([adb], ValueError("PRIVATE_ERROR")), ([adb, adb], error)):
+            observed = H.emulator_cleanup_observation([emulator, adb], remaining, emulator, adb, "DRAIN_GROUPS", failure)
+            self.assertIsNone(observed["failed_group_index"]); self.assertNotIn("PRIVATE_ERROR", json.dumps(observed))
+        bounded = H.emulator_cleanup_observation([adb] * 9, [], emulator, adb, "DRAIN_GROUPS", error)
+        self.assertEqual(bounded["observation_error"], "OWNERSHIP_OBSERVATION_BOUND")
+        emulator.poll.assert_not_called(); adb.poll.assert_not_called()
+
+    def test_terminal_logs_publish_only_bounded_fingerprints_and_finite_tokens(self):
+        self.terminal_files()
+        observed = H.emulator_failure_diagnostic(self.root, self.source)
+        self.assertIsNone(observed["capture_error"]); self.assertEqual(observed["namespace_exit"], 1)
+        self.assertEqual([entry["role"] for entry in observed["logs"]], ["emulator", "adb_server"])
+        self.assertEqual(observed["logs"][0]["observed_markers"], ["ERROR_TOKEN", "KVM_TOKEN"])
+        self.assertEqual(observed["logs"][1]["observed_markers"], ["FATAL_TOKEN"])
+        self.assertTrue(all(entry["coverage"] == "COMPLETE" for entry in observed["logs"]))
+        encoded = json.dumps(observed)
+        self.assertNotIn("SECRET", encoded); self.assertNotIn("https://", encoded); self.assertNotIn(str(self.root), encoded)
+        self.assertLessEqual(len(encoded.encode()), 16384)
+
+    def test_live_or_undrained_namespace_rejects_before_any_log_open(self):
+        for mode in ("summary", "owned", "zero-exit"):
+            summary = self.terminal_files()
+            if mode == "summary": summary["owned_process_group_drained"] = False
+            elif mode == "zero-exit": summary["exit"] = 0
+            else: self.life.owned = [self.child([])]
+            (self.root / "emulator-namespace.json").write_text(json.dumps(summary))
+            with patch.object(H.os, "open", wraps=H.os.open) as opened:
+                observed = H.emulator_failure_diagnostic(self.root, self.source)
+            self.assertEqual(observed["capture_error"], "EMULATOR_DIAGNOSTIC_NOT_DRAINED")
+            self.assertFalse(observed["logs"])
+            self.assertTrue(all(not str(call.args[0]).endswith(".private.log") for call in opened.call_args_list))
+            self.life.owned = []
+
+    def test_terminal_log_fd_type_size_nofollow_nonblocking_and_read_races_reject(self):
+        self.terminal_files()
+        real_open, real_stat, real_close = H.os.open, H.os.fstat, H.os.close
+        fake = 987654
+        for change in (dict(st_mode=stat.S_IFIFO | 0o600), dict(st_size=64 * 1024**2 + 1), dict(st_nlink=2),
+                       dict(st_mode=stat.S_IFREG | 0o644), dict(st_uid=0)):
+            info = SimpleNamespace(st_mode=stat.S_IFREG | 0o600, st_size=7, st_nlink=1,
+                st_uid=H.os.getuid(), st_gid=H.os.getgid())
+            vars(info).update(change)
+            def opened(name, flags, **kwargs):
+                if name == "emulator.private.log":
+                    self.assertEqual(flags, H.os.O_RDONLY | H.os.O_CLOEXEC | H.os.O_NOFOLLOW | H.os.O_NONBLOCK)
+                    return fake
+                return real_open(name, flags, **kwargs)
+            with patch.object(H.os, "open", side_effect=opened), \
+                 patch.object(H.os, "fstat", side_effect=lambda fd: info if fd == fake else real_stat(fd)), \
+                 patch.object(H.os, "close", side_effect=lambda fd: None if fd == fake else real_close(fd)) as close, \
+                 patch.object(H.os, "read", wraps=H.os.read) as read:
+                observed = H.emulator_failure_diagnostic(self.root, self.source)
+            self.assertEqual(observed["capture_error"], "EMULATOR_DIAGNOSTIC_FILE")
+            self.assertTrue(any(call.args == (fake,) for call in close.call_args_list))
+            self.assertFalse(any(call.args[0] == fake for call in read.call_args_list))
+        log = self.root / "emulator.private.log"; log.unlink(); log.symlink_to(self.root / "emulator-namespace.json")
+        self.assertEqual(H.emulator_failure_diagnostic(self.root, self.source)["capture_error"], "EMULATOR_DIAGNOSTIC_IO")
+        with patch.object(H.os, "read", return_value=b""):
+            self.assertEqual(H.emulator_failure_diagnostic(self.root, self.source)["capture_error"], "EMULATOR_DIAGNOSTIC_CHANGED")
+        calls = [0]
+        def changed(fd):
+            calls[0] += 1; info = real_stat(fd)
+            if calls[0] != 3: return info
+            fields = {name: getattr(info, name) for name in ("st_dev", "st_ino", "st_rdev", "st_mode", "st_uid", "st_gid",
+                "st_nlink", "st_mtime_ns", "st_ctime_ns", "st_size")}
+            fields["st_ino"] += 1
+            return SimpleNamespace(**fields)
+        with patch.object(H.os, "fstat", side_effect=changed):
+            self.assertEqual(H.emulator_failure_diagnostic(self.root, self.source)["capture_error"], "EMULATOR_DIAGNOSTIC_CHANGED")
+
+    def test_two_log_prefix_tail_windows_never_join_gaps_and_total_at_most_64k(self):
+        raw = b"x" * 16382 + b"ER" + b"Qt platform SECRET_MIDDLE" * 100 + b"ROR" + b"x" * 16381
+        self.terminal_files(raw, raw)
+        with patch.object(H.os, "read", wraps=H.os.read) as read:
+            observed = H.emulator_failure_diagnostic(self.root, self.source)
+        self.assertIsNone(observed["capture_error"])
+        self.assertEqual(sum(entry["read_bytes"] for entry in observed["logs"]), 65536)
+        self.assertTrue(all(call.args[1] <= 16384 for call in read.call_args_list))
+        for entry in observed["logs"]:
+            self.assertEqual(entry["coverage"], "PREFIX_TAIL"); self.assertEqual(entry["log_bytes"], len(raw))
+            self.assertIsNone(entry["complete_log_fingerprint"]); self.assertEqual(entry["observed_markers"], [])
+            self.assertEqual(entry["windows"], [dict(offset=0, **P.digest(raw[:16384])),
+                dict(offset=len(raw) - 16384, **P.digest(raw[-16384:]))])
+
+    def test_phase_capture_and_save_errors_or_bounds_never_replace_namespace_failure(self):
+        original = ValueError("STEP_EMULATOR-NAMESPACE")
+        for mode in ("capture", "save", "bound", "public"):
+            state = self.root / mode; state.mkdir(mode=0o700)
+            phase = "public-build" if mode == "public" else "emulator"
+            with patch.object(H, "run", side_effect=original), patch.object(H, "emulator_failure_diagnostic", return_value={}) as capture, \
+                 patch.object(H, "save") as save:
+                if mode == "capture": capture.side_effect = OSError("PRIVATE_CAPTURE")
+                elif mode == "save": save.side_effect = OSError("PRIVATE_SAVE")
+                elif mode == "bound": capture.return_value = dict(private="x" * 16384)
+                with self.assertRaises(ValueError) as caught: H.run_phase(state, phase, dict(GITHUB_SHA=self.source), 420)
+                self.assertIs(caught.exception, original)
+                if mode in ("public", "bound"): save.assert_not_called()
+                if mode == "public": capture.assert_not_called()
+
+    def test_existing_finalizer_retains_terminal_diagnostics_and_excludes_raw_logs(self):
+        self.terminal_files()
+        original = ValueError("STEP_EMULATOR-NAMESPACE")
+        with patch.object(H, "run", side_effect=original):
+            with self.assertRaises(ValueError) as caught: H.run_phase(self.root, "emulator", dict(GITHUB_SHA=self.source), 420)
+        self.assertIs(caught.exception, original)
+        diagnostic = json.loads((self.root / "emulator-failure-diagnostic.json").read_text())
+        self.assertIsNone(diagnostic["capture_error"])
+        evidence = self.root.parent / (self.root.name + "-evidence")
+        self.addCleanup(lambda: __import__("shutil").rmtree(evidence, ignore_errors=True))
+        with patch.object(self.life, "drain_all"), patch.object(H, "baseline", return_value=dict(inert=True)):
+            result = H.finalize(self.root, evidence, dict(inert=True), False, original)
+        self.assertFalse(result["success"])
+        self.assertEqual(json.loads((evidence / "emulator-failure-diagnostic.json").read_text()), diagnostic)
+        self.assertFalse((evidence / "emulator.private.log").exists()); self.assertFalse((evidence / "adb.private.log").exists())
+
+
 class KvmShimTests(unittest.TestCase):
     """No local KVM device, ioctl, credentials, namespace, signal or workload execution."""
     def setUp(self):

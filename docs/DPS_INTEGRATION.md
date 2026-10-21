@@ -240,10 +240,11 @@ python3 -B -m unittest discover -s integrations/dps-native -p 'test_*.py' -v
 git diff --check
 ```
 
-These pass for the current authored correction: source bindings plus 56 inert
+These pass for the current authored correction: source bindings plus 66 inert
 tests (seven Python/Git/archive preparation tests, six lifetime orchestration
 shims, 18 KVM/phase/input-file shims, eight baseline-diagnostic shims, and nine
-synthetic firewall JSON tests, plus eight offline-failure diagnostic tests).
+synthetic firewall JSON tests, eight offline-failure diagnostic tests, and ten
+emulator-observation tests).
 The shims cover deferred signal delivery until child ownership is registered,
 unblocked child signals without a pre-exec hook, repeated INT/TERM deadlines,
 original-failure precedence, honest incomplete cleanup/state preservation,
@@ -253,7 +254,7 @@ make no privileged call; passing them is not cancellation runtime acceptance. Th
 they are never passed to JNI and never represented as real Protobuf goldens.
 No Rust, native, Java, Gradle, SDK, Node, emulator or hardware execution occurred
 on the development host. The published candidate's failed hosted attempt is
-preserved below; the current three-file loopback correction has not been dispatched.
+preserved below; the current three-file emulator-observation correction has not been dispatched.
 
 ## Hosted candidate and evidence boundaries
 
@@ -610,7 +611,7 @@ occurred. The subsequent actual diagnostic observations are retained below.
 Installed Android/JNI execution, all eight instrumentation tests and
 physical-positioning acceptance remain open.
 
-### Captured offline local-address marker; loopback correction unrun
+### Captured offline local-address marker and loopback correction
 
 Published source `1d4b777c3cd06822d89d6f54a36a2646876a995d`, tree
 `f2eaff7614f26f789830d058eb98def9a0d64a46`, passed source run `39675913577`
@@ -634,8 +635,9 @@ after both namespace/link guards and before credential drop. The existing fixed
 and KVM probe do not activate loopback. This touches only the disposable fixture's
 private loopback; it adds no external interface, host configuration change,
 permission, cache change, fallback, retry or build-command change. It targets the
-observed local-address-selection failure; actual offline resolution still needs
-a new hosted trial.
+observed local-address-selection failure. At that checkpoint the correction was
+unrun; the subsequent successful offline rebuild is recorded below, separately
+from the unresolved emulator failure.
 
 The same failed run passed both cancellation controls, with six tracked process
 identities extinct in each. Outer registered groups drained and owned state was
@@ -654,8 +656,107 @@ Three added mocked phase tests verify offline-build/emulator activate only
 loopback exactly once before drop, public-build/KVM do not, and wrong namespaces
 or unexpected/missing private interfaces reject before activation or drop. No
 local network, SDK, Gradle, native, Rust or VM execution occurred. The correction
-is **unrun on a hosted runner** and does not establish VM, installed Android/JNI,
-instrumentation or physical-positioning acceptance.
+did not itself establish VM, installed Android/JNI, instrumentation or
+physical-positioning acceptance. Its subsequent actual observations are below.
+
+### Offline rebuild passed; emulator failure observations candidate unrun
+
+Actual run [39679300414](https://github.com/VOLPAROSSA/volparossa-map/actions/runs/39679300414)
+used exact source `02cf65b9cea0fd9a09e51f434d8b55deccb40fb7`. Original artifact
+`12383765694.zip` is 82,992 bytes, SHA-256
+`e19bb6842b31a2c9f630236296a0ebf86e6bc835a7128c57cad38ac8bf40c23d`;
+the 75,430-byte original log SHA-256 is
+`ed5f185d6652d6e7efdae3c3e51ac56763f121e1f6b74533caac8ce46aad2de7`.
+Both public assembly and strict offline rebuild exited `0`. The recorded offline
+test APK is 2,742,891 bytes, SHA-256
+`a4ae3849f6eae70e81cc1a35b80f3439bc842f4a5a33fc9c24d0bf01ac97301d`.
+No installed APK or instrumentation result was reached.
+
+The emulator phase failed `EMULATOR_BOOT`, after `boot-1` exited `1` and its owned
+group drained. A failing ADB boot-property command is explicitly caught and
+followed by another loop iteration. That exit is not the later fatal condition:
+the top-of-loop guard rejects an exited emulator, an exited ADB server, or the
+180-second boot deadline. The old receipts do not identify which condition fired
+or why a process exited. The private emulator/ADB logs were not retained.
+
+Namespace cleanup reported `ValueError`, remaining direct children and unremoved
+private AVD/Android-home directories. Its drain was not confirmed before removal;
+the receipt lacks a closed error code or failed group identity. `PROCESS_GROUP_DRAIN`
+is a source-consistent possibility, but this artifact cannot prove that code or a
+zombie-process explanation. Outer namespace/group termination and owned-state
+removal were confirmed, while outer host-baseline acceptance failed. Changed
+components were raw IPv6, firewall statistics and KVM node timestamps. Firewall
+configuration matched. Raw IPv6 stayed 900 bytes but changed from
+`ecb024bb1046fa7febe556967807b3fe657d62aafa7ff50a76bc1da15b5e78ae`
+to `153e0b6fb746f1957032642861b728f8ec93e10d1d76cff268311a3cb73485a0`.
+Its original contents were not retained, so the cause remains unknown.
+
+The emulator-phase KVM API probe opened the device, queried `12`, closed its FD,
+and passed its own before/after full-metadata checks. The phase receipt's
+`device_unchanged=false` is its initial default: workload failure prevented the
+final success-only device comparison from running. It is not an observed
+`KVM_DEVICE_CHANGED` failure. Independently, the outer snapshot observed only
+`mtime_ns`/`ctime_ns` changing, from `1792618139165185792` to
+`1792618502442878002`; node identity/mode/owner/group/rdev/link count and ACL matched.
+This proves neither which actor changed timestamps nor successful VM creation.
+The probe's `vm_created=false` describes its query-only calls, not all actions
+the launched emulator might have attempted. Both synthetic cancellation controls
+passed with six tracked process identities extinct in each.
+
+Upstream research supplies a **hypothesis**, not runner-version or event proof:
+Linux v6.8, commit `e8f897f4afef0031fe618a8e94127a0934896aba`,
+[`virt/kvm/kvm_main.c`](https://github.com/torvalds/linux/blob/e8f897f4afef0031fe618a8e94127a0934896aba/virt/kvm/kvm_main.c)
+(SPDX `GPL-2.0-only`), returns the API version without a VM-create call, while VM
+creation/destruction emits `KOBJ_CHANGE` events. Systemd v255, commit
+`db11bab38ccf1ed257f310d29070843d4c58ea01`,
+[`src/udev/udev-node.c`](https://github.com/systemd/systemd/blob/db11bab38ccf1ed257f310d29070843d4c58ea01/src/udev/udev-node.c)
+(SPDX `GPL-2.0-or-later`), updates a reused node's timestamps with `futimens_opath`.
+This is a possible timestamp-update mechanism; no recorded runner versions or
+uevents bind it to this run. No upstream code is imported, and this research
+grants no baseline-normalization authority. All KVM/IPv6 comparisons remain exact.
+
+The current candidate adds bounded observations only. It preserves short-circuit
+emulator-poll, ADB-poll and deadline order, the 180-second limit, command arguments,
+poll retry/sleep behavior and workload success conditions. Before cleanup it
+records the exact terminal predicate reason, which statuses/deadline were actually
+observed, bounded attempts/elapsed time and a separate last nonfatal poll code.
+An explicit flag distinguishes a primary `EMULATOR_BOOT` failure from a later
+guest check; a caught not-ready poll is never promoted into the terminal cause.
+
+Around the existing unchanged `drain_all`, fixed cleanup stages and at most eight
+registered object identities are observed in memory. Output contains fixed roles
+and cached return codes, no process IDs or command names. A zero-based failed
+group index in the initial reverse drain order is emitted only for the exact
+`PROCESS_GROUP_DRAIN` code with a proven removed-prefix/remaining-order invariant;
+otherwise it is unknown. The shared `Lifetime`, signal, wait, drain and directory
+removal mechanics are unchanged. No new `/proc` scanning or process-state inference
+is introduced. The existing namespace cleanup receipt remains bounded to 16 KiB.
+
+Only after the enclosing namespace's failed command has joined and its registered
+group drained may the parent sample fixed `emulator.private.log` and `adb.private.log`.
+Its fixed step receipt must report nonzero exit, confirmed drain and no cleanup
+error, with no remaining registered parent children. The previous private owned
+directory/relative-FD pattern checks mode/owner/group, single-link regular files,
+nonblocking/no-follow/close-on-exec opens and stable descriptor metadata. Inputs
+over the existing 64 MiB log bound reject before reading. Each log contributes
+at most 32 KiB (16 KiB prefix plus tail); aggregate sampled log bytes are at most
+64 KiB, plus at most 4 KiB for the fixed step receipt. Actual sizes, sampled sizes,
+offset/hash windows and complete-versus-window coverage remain distinct. Only
+complete coverage gets an entire-log fingerprint. Disjoint windows are never
+concatenated for marker matching.
+
+The source-bound `emulator-failure-diagnostic.json` is bounded to 16 KiB and emits
+only finite literal-token observations (`ERROR`, `FATAL`, `KVM`, `AVD`, `Vulkan`,
+`Qt platform`), fingerprints and closed capture codes. Token observations are not
+causes. No raw text, path, PID, URL, nonce or user data is published. All FD closing
+is attempted; close failure is reported. Capture/save failures preserve the
+original namespace failure, and existing cleanup budgets are never extended.
+Hard kill or blocked I/O can still prevent receipts; missing data cannot prove
+successful capture. Ten new inert tests cover predicate independence, not-ready
+continuation, primary/cleanup separation, index proof, terminal-source gating,
+read races, FD/type/size bounds, window coverage/privacy and error precedence.
+This candidate is **unrun on a hosted runner**. It establishes no emulator boot,
+installed Android/JNI, sensor or physical-positioning acceptance.
 
 ### Catchable cancellation requirements and scoped hosted proof
 

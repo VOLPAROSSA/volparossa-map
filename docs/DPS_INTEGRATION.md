@@ -11,10 +11,17 @@ without DPS aliases. Consumers must not implement those prototype assignments.
 
 Earlier source `1fd9397e` passes Quality `39612903195`, including 17 DPS tests,
 and CodeQL `39612896634`; those results do not accept the corrected allocation.
-The pinned candidate requires its own Quality `39616727891` and CodeQL
-`39616721234` results. It is not a merged-main guarantee, and no native Map
-integration has been accepted. The core ledger preserves the initial build,
-lockfile and lint failures alongside subsequent evidence.
+The corrected source subsequently passed Quality `39616727891` and CodeQL
+`39616721234` and was merged through core PR299. Core main
+[`e3b78c6376ccfe6ca9a4af1a60ffe65771ab1feb`](https://github.com/VOLPAROSSA/volparossa/tree/e3b78c6376ccfe6ca9a4af1a60ffe65771ab1feb)
+also contains the separately accepted, bounded dormant-daemon proof and the
+Storage composition. Its tested non-documentation blobs match composition
+source `aa876ea25832efc1cda797b2e4c6be992ed15d14`, whose Quality `39639849031`
+and CodeQL `39639840728` pass. These checks establish synthetic assessment and
+the recorded daemon lifecycle only; no native Map adapter, location permission,
+sensor or positioning improvement is accepted. The
+[core evidence ledger](https://github.com/VOLPAROSSA/volparossa/blob/e3b78c6376ccfe6ca9a4af1a60ffe65771ab1feb/docs/IMPLEMENTATION_STATUS.md)
+preserves the original build, lockfile and lint failures and exact evidence limits.
 
 ## Existing native inputs
 
@@ -81,6 +88,52 @@ and persistence require separate explicit permissions/consent. Do not route a
 DPS result to `GpsTracker` or `TrackRecorder`, or retain it as movement history,
 unless the existing independent recording choice explicitly authorizes that
 recording. Revocation and expiry must clear the app's DPS-selected state.
+
+## Next app-owned Android slice
+
+Reuse the shared Rust `DpsAssessRequest::assess` implementation through a bounded,
+separately typed native bridge. Do not connect the app to the administrative
+socket or reimplement the assessor in Java/C++. Keep any necessary JNI/FFI unsafe
+boundary separate from the shared Rust code's existing unsafe-code prohibition.
+This is an implementation plan; neither the native bridge nor its consent
+coordinator exists in the pinned source.
+
+The existing `:sdk` module builds the `organicmaps` C++ shared library through
+[`android/sdk/src/main/cpp/CMakeLists.txt`](https://github.com/organicmaps/organicmaps/blob/b20d1417eef1e3c63a447ac8658db4307a066024/android/sdk/src/main/cpp/CMakeLists.txt)
+and [`android/sdk/build.gradle`](https://github.com/organicmaps/organicmaps/blob/b20d1417eef1e3c63a447ac8658db4307a066024/android/sdk/build.gradle).
+It currently has no Rust linkage. A real adapter therefore needs explicit
+per-ABI Rust compilation and linkage plus a separate JNI quality-result API.
+Keep it outside `LocationState.nativeLocationUpdated`, whose input is forwarded
+as an Android GPS fix and can reach track recording.
+
+The initial native fixture must display synthetic Cartesian assessment quality
+while Android location permission remains denied. It must not subscribe to
+`LocationHelper`: `addListener` immediately replays a saved real fix, and
+`start()` can start both location polling and `SensorHelper`. A separate
+app-owned coordinator needs a consent generation and monotonic expiry, checked
+before work and again before publishing a result. Disable, revocation and
+background transition must clear selected DPS state and discard pending or late
+results. This controls the app's own work; it does not prove OS isolation from
+other apps or revoke copies already delivered to a caller.
+
+The native acceptance fixture must exercise unavailable/offline input, expiry,
+revocation during work, background/resume and a late completion from an obsolete
+generation. Verify actual displayed quality, no permission prompt, no location
+provider or sensor start, no network activity or location persistence, and joined
+owned work. Unit tests alone cannot accept this native behavior. Coordinate
+conversion, real sensors, GNSS integrity and navigation remain later requirements.
+
+The pinned upstream
+[`Android workflow`](https://github.com/organicmaps/organicmaps/blob/b20d1417eef1e3c63a447ac8658db4307a066024/.github/workflows/android-check.yaml)
+provides a build/test reference, including `sdk:connectedDebugAndroidTest` on an
+API 35 x86_64 emulator. Its
+[`build configuration`](https://github.com/organicmaps/organicmaps/blob/b20d1417eef1e3c63a447ac8658db4307a066024/android/groovy/common-config.gradle)
+uses SDK 36 and NDK `29.0.14206865`; Java 17, Gradle `9.6.0` and CMake 3.22.1 or
+later are declared in the pinned Gradle configuration. Before an actual build,
+bind exact reviewed tool archives and Rust target/linker inputs in the existing
+hosted workflow. These upstream declarations do not prove a VOLPAROSSA build
+or authorize installation on the development host. Preserve Apache-2.0 and all
+separate source/data notices.
 
 ## Scope and acceptance stages
 

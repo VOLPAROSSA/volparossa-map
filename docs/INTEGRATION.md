@@ -124,6 +124,7 @@ public compute. Each feature needs its own actual app integration proof.
 
 The optional DPS location-source boundary, pinned Android/iOS lifecycle seams,
 coordinate conversion requirements and staged acceptance criteria are recorded
-in [DPS_INTEGRATION.md](DPS_INTEGRATION.md). The core DPS candidate is under
-review; this documentation does not imply a native Map adapter or positioning
-acceptance.
+in [DPS_INTEGRATION.md](DPS_INTEGRATION.md), including the next app-owned Android
+bridge and synthetic lifecycle fixture. The bounded core assessment is merged;
+native Map adaptation, sensor acquisition and positioning improvement remain
+unaccepted.

@@ -119,3 +119,11 @@ storage, explicitly encrypted location sharing, and local/private compute for
 questions about a selected map area. Keep route computation and location matching
 local; never silently feed live location or travel history into cooperative
 public compute. Each feature needs its own actual app integration proof.
+
+## Shared decentralized positioning
+
+The optional DPS location-source boundary, pinned Android/iOS lifecycle seams,
+coordinate conversion requirements and staged acceptance criteria are recorded
+in [DPS_INTEGRATION.md](DPS_INTEGRATION.md). The core DPS candidate is under
+review; this documentation does not imply a native Map adapter or positioning
+acceptance.

@@ -897,6 +897,117 @@ def emulator_failure_diagnostic(state, source):
     return result
 
 
+def instrumentation_observation(output):
+    """Closed diagnostic of existing output, never test or workload authority."""
+    methods = ("actualRustJniGoldensAndClosedErrors", "strictSummaryRejectsUnknownOrContradictoryFields",
+        "controllerDropsLateRevokedExpiredBackgroundResultsAndJoins", "controllerRechecksAuthorityBeforeUiPublicationAndExpiryClears",
+        "obsoleteGenerationNeverPublishesAfterQueuedCompletion", "publicationWindowExpiryDropsPostedResult",
+        "backgroundDuringFreshInflightWorkDropsLateResultAndResumeStaysDisabled", "actualDebugActivityDisplayRevokeBackgroundAndPermissionBoundary")
+    rows = {name: dict(status="NOT_OBSERVED", failure_family=None) for name in methods}
+    result = dict(schema=1, kind="instrumentation-output-observation", tests=rows, inventory_complete=False,
+        all_eight_passed=False, parse_error=None, unexpected_records=False, duplicate_records=False,
+        final_code="NOT_OBSERVED", acceptance_tokens=dict(ok_eight=None, failures=None, instrumentation_failed=None),
+        counts={status: 8 if status == "NOT_OBSERVED" else 0 for status in
+                ("NOT_OBSERVED", "STARTED", "UNKNOWN", "PASSED", "ERROR", "FAILED", "IGNORED", "ASSUMPTION_FAILED")})
+    if type(output) is not bytes or len(output) > 256 * 1024:
+        result["parse_error"] = "OUTPUT_TYPE_OR_BOUND"; return result
+    result["acceptance_tokens"] = dict(ok_eight=b"OK (8 tests)" in output, failures=b"FAILURES" in output,
+                                      instrumentation_failed=b"INSTRUMENTATION_FAILED" in output)
+    if output.count(b"\n") > 4096:
+        result["parse_error"] = "LINE_COUNT_BOUND"; return result
+    lines = output.split(b"\n")
+    if any(len(line) > 8192 for line in lines):
+        result["parse_error"] = "LINE_BYTES_BOUND"; return result
+    if output and not output.endswith(b"\n"):
+        result["parse_error"] = "TRUNCATED_FINAL_LINE"; return result
+    families = {b"java.lang.AssertionError": "ASSERTION", b"junit.framework.AssertionFailedError": "ASSERTION",
+        b"java.lang.UnsatisfiedLinkError": "JNI_LINK", b"java.lang.NoClassDefFoundError": "CLASS_LOAD",
+        b"java.lang.ClassNotFoundException": "CLASS_LOAD", b"java.lang.ExceptionInInitializerError": "INITIALIZER",
+        b"java.lang.SecurityException": "SECURITY", b"java.lang.IllegalArgumentException": "ARGUMENT",
+        b"java.lang.IllegalStateException": "STATE", b"java.io.FileNotFoundException": "IO"}
+    terminal = {b"0": "PASSED", b"-1": "ERROR", b"-2": "FAILED", b"-3": "IGNORED", b"-4": "ASSUMPTION_FAILED"}
+    names = {name.encode(): name for name in methods}
+    bundle, started, finished, ordinals, result_seen, valid_result = {}, set(), set(), {}, False, False
+    for raw in lines:
+        line = raw.removesuffix(b"\r")
+        if result["final_code"] != "NOT_OBSERVED" and line.startswith(
+                (b"INSTRUMENTATION_STATUS:", b"INSTRUMENTATION_STATUS_CODE:", b"INSTRUMENTATION_RESULT:")):
+            result["unexpected_records"] = True
+        if result_seen and line.startswith((b"INSTRUMENTATION_STATUS:", b"INSTRUMENTATION_STATUS_CODE:")):
+            result["unexpected_records"] = True
+        if line.startswith(b"INSTRUMENTATION_STATUS: "):
+            key, separator, value = line[24:].partition(b"=")
+            if not separator or key not in {b"id", b"class", b"test", b"numtests", b"current", b"stack", b"stream"}:
+                result["unexpected_records"] = True
+            elif key in bundle:
+                result["duplicate_records"] = True
+            else: bundle[key] = value
+        elif line.startswith(b"INSTRUMENTATION_STATUS_CODE: "):
+            code = line[29:]
+            name = names.get(bundle.get(b"test"))
+            current = bundle.get(b"current", b"")
+            valid = (name is not None and bundle.get(b"class") == b"org.volparossa.map.dps.QualityInstrumentedTest"
+                and bundle.get(b"id") == b"AndroidJUnitRunner" and bundle.get(b"numtests") == b"8"
+                and current in {b"1", b"2", b"3", b"4", b"5", b"6", b"7", b"8"})
+            if not valid or code not in {b"1", *terminal}:
+                result["unexpected_records"] = True
+                if name is not None: rows[name]["status"] = "UNKNOWN"
+            elif code == b"1":
+                if name in started or current in ordinals:
+                    result["duplicate_records"] = True; rows[name]["status"] = "UNKNOWN"
+                else:
+                    started.add(name); ordinals[current] = name; rows[name]["status"] = "STARTED"
+            elif ordinals.get(current) != name:
+                result["unexpected_records"] = True; rows[name]["status"] = "UNKNOWN"
+            elif name not in started or name in finished or rows[name]["status"] != "STARTED":
+                result["duplicate_records"] = True; rows[name]["status"] = "UNKNOWN"
+            else:
+                finished.add(name); rows[name]["status"] = terminal[code]
+                if code in {b"-1", b"-2", b"-4"}:
+                    exception = bundle.get(b"stack", b"").partition(b":")[0]
+                    rows[name]["failure_family"] = families.get(exception, "UNKNOWN")
+                elif b"stack" in bundle: result["unexpected_records"] = True
+            bundle = {}
+        elif line.startswith(b"INSTRUMENTATION_CODE: "):
+            if not valid_result or bundle: result["unexpected_records"] = True
+            if result["final_code"] != "NOT_OBSERVED": result["duplicate_records"] = True
+            result["final_code"] = "RESULT_OK" if line[22:] == b"-1" else "OTHER"
+            if result["final_code"] == "OTHER": result["unexpected_records"] = True
+        elif line.startswith(b"INSTRUMENTATION_RESULT: "):
+            if result_seen: result["duplicate_records"] = True
+            result_seen = True
+            if not line.startswith(b"INSTRUMENTATION_RESULT: stream=") or bundle or result["final_code"] != "NOT_OBSERVED":
+                result["unexpected_records"] = True
+            else: valid_result = True
+        elif line.startswith((b"INSTRUMENTATION_", b"INSTRUMENTATION_FAILED")):
+            result["unexpected_records"] = True
+    if bundle: result["parse_error"] = "UNTERMINATED_STATUS_RECORD"
+    clean = not result["parse_error"] and not result["unexpected_records"] and not result["duplicate_records"]
+    result["inventory_complete"] = bool(clean and valid_result and len(finished) == 8 and result["final_code"] == "RESULT_OK")
+    result["all_eight_passed"] = bool(result["inventory_complete"] and all(row["status"] == "PASSED" for row in rows.values())
+        and result["acceptance_tokens"] == dict(ok_eight=True, failures=False, instrumentation_failed=False))
+    result["counts"] = {status: sum(row["status"] == status for row in rows.values())
+        for status in ("NOT_OBSERVED", "STARTED", "UNKNOWN", "PASSED", "ERROR", "FAILED", "IGNORED", "ASSUMPTION_FAILED")}
+    return result
+
+
+def retain_instrumentation_observation(state, source, output):
+    """No new capture; diagnostics cannot replace acceptance or cancellation."""
+    ACTIVE.check()
+    try:
+        result = instrumentation_observation(output)
+        require(type(source) is str and re.fullmatch("[0-9a-f]{40}", source), "INSTRUMENTATION_OBSERVATION_SOURCE")
+        result["source"] = source
+        require(len((json.dumps(result, indent=2, sort_keys=True) + "\n").encode()) <= 16384,
+                "INSTRUMENTATION_OBSERVATION_BOUND")
+        save(state / "instrumentation-result-diagnostic.json", result)
+    except (Interrupted, CleanupDeadline):
+        raise
+    except Exception:
+        pass
+    ACTIVE.check()
+
+
 def emulator_trial(state, env):
     tools, android = state / "tools", state / "prepared/android"
     success, cleanup = False, False
@@ -949,6 +1060,7 @@ def emulator_trial(state, env):
         save(state / "tested-apk.json", binding["apk"])
         command("install-test", "install", "--no-streaming", apks[0], seconds=60)
         output = command("instrumentation", "shell", "am", "instrument", "-w", "-r", RUNNER, seconds=180)
+        retain_instrumentation_observation(state, env["GITHUB_SHA"], output)
         require(b"OK (8 tests)" in output and b"FAILURES" not in output
                 and b"INSTRUMENTATION_FAILED" not in output, "ACTUAL_INSTRUMENTATION_RESULT")
         command("stop-test", "shell", "am", "force-stop", PACKAGE)

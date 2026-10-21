@@ -665,6 +665,169 @@ class OfflineDiagnosticTests(unittest.TestCase):
         self.assertEqual(json.loads((self.root / "offline-apk.json").read_text())["source"], self.source)
 
 
+class InstrumentationObservationTests(unittest.TestCase):
+    """Existing-output protocol fixtures only; no runner or Android execution."""
+    methods = ("actualRustJniGoldensAndClosedErrors", "strictSummaryRejectsUnknownOrContradictoryFields",
+        "controllerDropsLateRevokedExpiredBackgroundResultsAndJoins", "controllerRechecksAuthorityBeforeUiPublicationAndExpiryClears",
+        "obsoleteGenerationNeverPublishesAfterQueuedCompletion", "publicationWindowExpiryDropsPostedResult",
+        "backgroundDuringFreshInflightWorkDropsLateResultAndResumeStaysDisabled", "actualDebugActivityDisplayRevokeBackgroundAndPermissionBoundary")
+
+    def record(self, name, current, code, stack=None):
+        values = [("id", "AndroidJUnitRunner"), ("class", "org.volparossa.map.dps.QualityInstrumentedTest"),
+                  ("test", name), ("numtests", "8"), ("current", str(current)), ("stream", ".")]
+        if stack is not None: values.append(("stack", stack))
+        return ("".join("INSTRUMENTATION_STATUS: " + key + "=" + value + "\n" for key, value in values)
+                + "INSTRUMENTATION_STATUS_CODE: " + str(code) + "\n").encode()
+
+    def transcript(self, code=0, stack=None):
+        records = b"".join(self.record(name, i, 1) + self.record(name, i, code if i == 1 else 0, stack if i == 1 else None)
+                           for i, name in enumerate(self.methods, 1))
+        return records + b"INSTRUMENTATION_RESULT: stream=\nOK (8 tests)\nINSTRUMENTATION_CODE: -1\n"
+
+    def test_eight_fixed_methods_and_lf_crlf_status_inventory_are_distinct_from_acceptance(self):
+        for output in (self.transcript(), self.transcript().replace(b"\n", b"\r\n")):
+            observed = H.instrumentation_observation(output)
+            self.assertEqual(tuple(observed["tests"]), self.methods)
+            self.assertTrue(observed["inventory_complete"]); self.assertTrue(observed["all_eight_passed"])
+            self.assertEqual(observed["counts"]["PASSED"], 8)
+            self.assertTrue(all(row == dict(status="PASSED", failure_family=None) for row in observed["tests"].values()))
+        summary_only = H.instrumentation_observation(b"OK (8 tests)\n")
+        self.assertTrue(summary_only["acceptance_tokens"]["ok_eight"])
+        self.assertFalse(summary_only["inventory_complete"]); self.assertFalse(summary_only["all_eight_passed"])
+        failed_summary = H.instrumentation_observation(self.transcript().replace(b"OK (8 tests)", b"FAILURES!!!"))
+        self.assertTrue(failed_summary["inventory_complete"]); self.assertFalse(failed_summary["all_eight_passed"])
+
+    def test_failure_statuses_and_exception_families_are_closed_and_private_text_is_omitted(self):
+        cases = ((-1, "ERROR", "java.lang.UnsatisfiedLinkError", "JNI_LINK"),
+                 (-2, "FAILED", "java.lang.AssertionError", "ASSERTION"),
+                 (-4, "ASSUMPTION_FAILED", "java.lang.SecurityException", "SECURITY"),
+                 (-2, "FAILED", "private.UnexpectedException", "UNKNOWN"), (-3, "IGNORED", None, None))
+        for code, status, exception, family in cases:
+            output = self.transcript(code, None if exception is None else exception + ": SECRET_PATH /private/name\n\tat private.Stack.file")
+            observed = H.instrumentation_observation(output)
+            self.assertEqual(observed["tests"][self.methods[0]], dict(status=status, failure_family=family))
+            self.assertFalse(observed["all_eight_passed"])
+            encoded = json.dumps(observed)
+            for secret in ("SECRET", "/private", "private.", "Stack.file"): self.assertNotIn(secret, encoded)
+            self.assertLessEqual(len(encoded.encode()), 16384)
+
+    def test_unknown_duplicate_mismatched_or_partial_protocol_never_becomes_complete(self):
+        good = self.transcript()
+        mutations = (good.replace(self.methods[0].encode(), b"PRIVATE_METHOD"),
+            good.replace(b"org.volparossa.map.dps.QualityInstrumentedTest", b"PRIVATE_CLASS"),
+            good.replace(b"numtests=8", b"numtests=9"), good.replace(b"STATUS_CODE: 0", b"STATUS_CODE: 7", 1),
+            good.replace(b"STATUS: current=1", b"STATUS: current=2", 1),
+            self.record(self.methods[0], 1, 1) + good,
+            good + b"INSTRUMENTATION_CODE: -1\n", good + b"INSTRUMENTATION_STATUS: privateKey=SECRET\n",
+            good.replace(b"INSTRUMENTATION_RESULT: stream=", b"INSTRUMENTATION_RESULT: stream=\nINSTRUMENTATION_RESULT: stream="),
+            b"INSTRUMENTATION_CODE: -1\n" + good.removesuffix(b"INSTRUMENTATION_CODE: -1\n"),
+            good.replace(b"INSTRUMENTATION_STATUS: id=", b"INSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: id=", 1),
+            good.replace(b"INSTRUMENTATION_STATUS_CODE: 0\n", b"", 1),
+            good.replace(b"INSTRUMENTATION_CODE: -1", b"INSTRUMENTATION_CODE: 0"), good[:-1])
+        for output in mutations:
+            with self.subTest(output_bytes=len(output)):
+                observed = H.instrumentation_observation(output)
+                self.assertFalse(observed["inventory_complete"]); self.assertFalse(observed["all_eight_passed"])
+                self.assertTrue(observed["unexpected_records"] or observed["duplicate_records"] or observed["parse_error"])
+                self.assertNotIn("PRIVATE", json.dumps(observed)); self.assertNotIn("SECRET", json.dumps(observed))
+
+    def test_byte_line_and_line_length_bounds_stop_before_protocol_decode(self):
+        cases = ((None, "OUTPUT_TYPE_OR_BOUND"), (b"x" * (256 * 1024 + 1), "OUTPUT_TYPE_OR_BOUND"),
+                 (b"\n" * 4097, "LINE_COUNT_BOUND"), (b"x" * 8193 + b"\n", "LINE_BYTES_BOUND"))
+        for output, code in cases:
+            observed = H.instrumentation_observation(output)
+            self.assertEqual(observed["parse_error"], code); self.assertFalse(observed["all_eight_passed"])
+            self.assertTrue(all(row["status"] == "NOT_OBSERVED" for row in observed["tests"].values()))
+
+    def test_result_is_required_after_all_status_records_and_before_final_code(self):
+        good = self.transcript(); result_line = b"INSTRUMENTATION_RESULT: stream=\n"
+        missing = good.replace(result_line, b"")
+        first = self.record(self.methods[0], 1, 1)
+        cases = (missing, result_line + missing, first + result_line + missing[len(first):],
+                 good.replace(b"INSTRUMENTATION_STATUS_CODE: 1\n",
+                              b"INSTRUMENTATION_CODE: -1\nINSTRUMENTATION_STATUS_CODE: 1\n", 1))
+        for output in cases:
+            with self.subTest(output_bytes=len(output)):
+                observed = H.instrumentation_observation(output)
+                self.assertTrue(observed["unexpected_records"])
+                self.assertFalse(observed["inventory_complete"]); self.assertFalse(observed["all_eight_passed"])
+                self.assertEqual(observed["counts"]["PASSED"], 8)
+                self.assertEqual(observed["acceptance_tokens"], dict(ok_eight=True, failures=False, instrumentation_failed=False))
+
+    def test_retention_bound_failures_and_cancellation_keep_original_authority(self):
+        life = H.Lifetime()
+        with tempfile.TemporaryDirectory() as directory, patch.object(H, "ACTIVE", life):
+            state = Path(directory); source = "a" * 40
+            H.retain_instrumentation_observation(state, source, self.transcript())
+            receipt = state / "instrumentation-result-diagnostic.json"
+            self.assertEqual(json.loads(receipt.read_text())["source"], source)
+            self.assertLessEqual(receipt.stat().st_size, 16384)
+            for target, failure in (("instrumentation_observation", ValueError("PRIVATE_DECODE")), ("save", OSError("PRIVATE_SAVE"))):
+                with patch.object(H, target, side_effect=failure):
+                    H.retain_instrumentation_observation(state, source, b"FAILURES\n")
+                    with self.assertRaisesRegex(ValueError, "ACTUAL_INSTRUMENTATION_RESULT"):
+                        H.require(False, "ACTUAL_INSTRUMENTATION_RESULT")
+            with patch.object(H, "instrumentation_observation", return_value={"private": "x" * 17000}), patch.object(H, "save") as save:
+                H.retain_instrumentation_observation(state, source, b""); save.assert_not_called()
+            for failure in (H.Interrupted("HOSTED_INTERRUPTED"), H.CleanupDeadline("CLEANUP_DEADLINE")):
+                with patch.object(H, "save", side_effect=failure):
+                    with self.assertRaises(type(failure)) as caught:
+                        H.retain_instrumentation_observation(state, source, b"")
+                    self.assertIs(caught.exception, failure)
+            def deferred_cancel(output):
+                life.first_signal = H.signal.SIGTERM
+                raise ValueError("PRIVATE_DECODE")
+            with patch.object(H, "instrumentation_observation", side_effect=deferred_cancel):
+                with self.assertRaises(H.Interrupted): H.retain_instrumentation_observation(state, source, b"")
+
+    def test_trial_acceptance_failure_wins_after_decode_or_receipt_write_failure(self):
+        for mode in ("decode", "save", "ordinary"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                state = Path(directory); source = "a" * 40; life = H.Lifetime()
+                apks = state / "prepared/android/volparossa_dps_jni/build/outputs/apk/androidTest/debug"
+                apks.mkdir(parents=True); (apks / "fixture.apk").write_bytes(b"inert apk never installed")
+                (state / "offline-apk.json").write_text(json.dumps(dict(source=source, apk=P.digest(b"inert apk never installed"))))
+                def spawn(*args, **kwargs):
+                    child = unittest.mock.Mock(returncode=None); child.poll.return_value = None
+                    life.owned.append(child); return child
+                def command(label, *args, **kwargs):
+                    return {"boot-1": b"1", "guest-api": b"36", "guest-abi": b"x86_64"}.get(label, b"INSTRUMENTATION_FAILED: private failure\n")
+                original_save, original_decode = H.save, H.instrumentation_observation
+                def save(path, value):
+                    if mode == "save" and path.name == "instrumentation-result-diagnostic.json": raise OSError("PRIVATE_SAVE")
+                    original_save(path, value)
+                def decode(output):
+                    if mode == "decode": raise ValueError("PRIVATE_DECODE")
+                    return original_decode(output)
+                with patch.object(H, "ACTIVE", life), patch.object(life, "spawn", side_effect=spawn), \
+                     patch.object(life, "drain_all", side_effect=life.owned.clear), patch.object(H, "run", side_effect=command) as run, \
+                     patch.object(H, "save", side_effect=save), patch.object(H, "instrumentation_observation", side_effect=decode), \
+                     patch.object(H.time, "monotonic", return_value=10), patch.object(H.signal, "setitimer"), \
+                     patch.object(H.signal, "getitimer", return_value=(0.0, 0.0)):
+                    with self.assertRaisesRegex(ValueError, "ACTUAL_INSTRUMENTATION_RESULT"):
+                        H.emulator_trial(state, dict(GITHUB_SHA=source))
+                self.assertEqual(run.call_args_list[-1].args[0], "instrumentation")
+                self.assertEqual(run.call_args_list[-1].kwargs, dict(seconds=180))
+                self.assertFalse((state / "native-result.json").exists())
+                self.assertTrue(json.loads((state / "namespace-cleanup.json").read_text())["direct_children_reaped"])
+
+    def test_existing_finalizer_copies_only_closed_json_and_removes_owned_private_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory) / "state"; state.mkdir(); evidence = Path(directory) / "evidence"
+            life = H.Lifetime(); before = dict(fixed="synthetic")
+            with patch.object(H, "ACTIVE", life), patch.object(H, "baseline", return_value=before), \
+                 patch.object(H, "baseline_unchanged", return_value=True), patch.object(life, "drain_all"), \
+                 patch.object(H.signal, "setitimer"), patch.object(H.signal, "getitimer", return_value=(0.0, 0.0)):
+                H.retain_instrumentation_observation(state, "a" * 40, self.transcript(-2, "java.lang.AssertionError: PRIVATE"))
+                (state / "instrumentation.private.log").write_bytes(b"PRIVATE raw stack")
+                H.finalize(state, evidence, before, False, ValueError("ACTUAL_INSTRUMENTATION_RESULT"))
+            self.assertFalse(state.exists()); self.assertFalse((evidence / "instrumentation.private.log").exists())
+            receipt = json.loads((evidence / "instrumentation-result-diagnostic.json").read_text())
+            self.assertEqual(receipt["tests"][self.methods[0]]["failure_family"], "ASSERTION")
+            self.assertNotIn("PRIVATE", json.dumps(receipt))
+            self.assertEqual(json.loads((evidence / "result.json").read_text())["primary_failure"], "ACTUAL_INSTRUMENTATION_RESULT")
+
+
 class EmulatorObservationTests(unittest.TestCase):
     """Mocked child/clock/drain behavior and inert files only; no emulator runs."""
     def setUp(self):

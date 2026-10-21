@@ -240,11 +240,22 @@ python3 -B -m unittest discover -s integrations/dps-native -p 'test_*.py' -v
 git diff --check
 ```
 
-These pass for the current authored correction: source bindings plus 69 inert
-tests (seven Python/Git/archive preparation tests, six lifetime orchestration
+The preceding source has 69 existing inert tests (seven Python/Git/archive
+preparation tests, six lifetime orchestration
 shims, 18 KVM/phase/input-file shims, eight baseline-diagnostic shims, and nine
 synthetic firewall JSON tests, eight offline-failure diagnostic tests, and 13
 emulator-observation/listener tests).
+The instrumentation diagnostic correction adds eight focused inert tests: **69
+existing + 8 new = 77** total. The source gate and eight new tests pass locally;
+all 69 existing test-method ASTs are preserved. The unchanged full suite was not
+rerun locally for this slice; the complete 77-test suite remains required on the
+hosted source gate. No Android tests ran locally. Focused reproduction is:
+
+```sh
+cd integrations/dps-native
+python3 -B -m unittest test_prepare.InstrumentationObservationTests -v
+```
+
 The shims cover deferred signal delivery until child ownership is registered,
 unblocked child signals without a pre-exec hook, repeated INT/TERM deadlines,
 original-failure precedence, honest incomplete cleanup/state preservation,
@@ -813,6 +824,77 @@ remain failures. The emulator phase's `device_unchanged=false` is still its
 unreached success-only comparison's default, not an observed mismatch. Both
 synthetic cancellation controls passed; no Android/JNI or positioning acceptance
 follows from these results.
+
+### Emulator boot passed; instrumentation result remains unaccepted
+
+Actual run [39685493968](https://github.com/VOLPAROSSA/volparossa-map/actions/runs/39685493968)
+on exact source `281fdef38ad737dcd55e98e99bf4e9132fad74e5` passed public/offline
+building, emulator boot, the API36/x86_64 predicates and APK installation command.
+The instrumentation command exited zero and its registered group drained, but
+the unchanged `ACTUAL_INSTRUMENTATION_RESULT` predicate failed. No native-result
+receipt was written. The artifact retains neither the instrumentation output nor
+individual test statuses, so the executed test count and failed test/exception
+remain unknown. Command exit zero is not proof that the eight tests executed.
+Original artifact `12385693095` is 95,618 bytes, SHA256
+`f31f0cffc4c944d05867c26ffaf990bc4268090a4652c0524db7a8afe0a6202f`;
+the original 79,473-byte log has SHA256
+`391840e2963da180628714b6f5ba383af905d52fecf0ae922d454ef43ca728d0`.
+
+Source inspection found no deterministic runner/summary-format incompatibility.
+The fixture declares eight JUnit methods, configures AndroidJUnitRunner, copies
+its public goldens into both test and debug assets, and installs the library's
+test APK. AndroidX release source at immutable commit
+`de417c55bd5226087b97a5121fae1d2ea1d58718` (tag `axt_2025_07_31_stable`)
+[`InstrumentationResultPrinter.java`](https://github.com/android/android-test/blob/de417c55bd5226087b97a5121fae1d2ea1d58718/runner/android_junit_runner/java/androidx/test/internal/runner/listener/InstrumentationResultPrinter.java)
+defines the raw status protocol and uses JUnit's text listener for the summary.
+This Apache-2.0 source reference supports parsing; no upstream code is imported,
+and it does not supply the missing installed-test result or merged manifest.
+
+The new diagnostic uses only the bytes already returned by the joined/drained
+instrumentation `run()` call, immediately before the byte-identical acceptance
+predicate. It adds no capture, file read, process, network request, retry, command
+argument, deadline or output digest. The parser accepts at most 256 KiB, 4,096
+LF-delimited lines and 8,192 bytes per line before bounded protocol decoding.
+This is a parser bound: the existing command capture/read retains its existing
+64 MiB limit. LF/CRLF are supported. An incomplete final line, pending record,
+unknown protocol key/class/method/status, unexpected ordinal, or duplicate record
+leaves the inventory incomplete. Untagged stream/stack continuations are not
+published or interpreted as protocol records.
+Review caught a missing ordering check in the first diagnostic candidate. The
+corrected decoder requires STATUS records, then a valid RESULT record with no
+pending bundle, then CODE; later STATUS records, missing/reordered RESULT or
+premature CODE cannot produce a complete inventory. Observed partial rows and
+acceptance-token facts remain visible. The original acceptance guard is unchanged.
+
+The only accepted test class is `org.volparossa.map.dps.QualityInstrumentedTest`,
+with the eight method names fixed in the decoder and source fixture. Raw status
+codes map only to start, pass, error, failure, ignored and assumption-failure.
+Rows expose closed statuses, bounded counts and exception families (assertion,
+JNI link, class load, initializer, security, argument, state, I/O or unknown).
+Unknown exception names are never copied; missing observations remain unknown.
+The final result code and the existing three acceptance-token observations remain
+distinct from a complete inventory. Diagnostic fields never decide acceptance.
+
+The fixed `instrumentation-result-diagnostic.json` is source-bound and checked
+against the existing 16 KiB receipt limit. It contains no raw stack, output,
+paths, URLs, exception messages or arbitrary class/method names. Existing
+`finalize()` already copies fixed-state `*.json` except `environment.json`, so no
+retention allowlist change is required. Decode/write failures are best-effort;
+they cannot replace the existing instrumentation acceptance error. Catchable
+interruption and cleanup deadlines retain authority, including cancellation
+deferred during a decoder error. Existing lifetimes, signals, cleanup, KVM and
+host-baseline comparisons are unchanged. Eight inert tests cover complete and
+partial protocols, status/family privacy, duplicate/unknown inputs, bounds,
+original-error precedence, cancellation and finalizer retention. This diagnostic
+has **not run on a hosted runner**; the full suite remains required there.
+
+The actual run's inner cleanup again reported `PROCESS_GROUP_DRAIN` at emulator
+reverse-ownership index 0. Outer groups drained and private state was removed,
+while raw IPv6 and KVM timestamps remained unconfirmed against the host baseline.
+Both cancellation controls passed. These failures remain unresolved; the phase's
+`device_unchanged=false` is still an unreached comparison's default. Boot and
+installation do not establish passing JNI tests, main Map navigation, sensor or
+physical-positioning acceptance.
 
 ### Catchable cancellation requirements and scoped hosted proof
 

@@ -232,7 +232,7 @@ the UI; the injected clock expires only after posting and before UI delivery.
 This separates worker-completion expiry from publication-window expiry. Every
 controller is closed and its real worker joined from the instrumentation thread.
 Injected clock/delay tests are synthetic lifecycle evidence, not hardware sensing.
-All eight tests have **not been run**. Inert local verification is:
+All eight tests lack accepted passing execution evidence. Inert local verification is:
 
 ```sh
 python3 -B integrations/dps-native/source_gate.py
@@ -245,15 +245,23 @@ preparation tests, six lifetime orchestration
 shims, 18 KVM/phase/input-file shims, eight baseline-diagnostic shims, and nine
 synthetic firewall JSON tests, eight offline-failure diagnostic tests, and 13
 emulator-observation/listener tests).
-The instrumentation diagnostic correction adds eight focused inert tests: **69
-existing + 8 new = 77** total. The source gate and eight new tests pass locally;
-all 69 existing test-method ASTs are preserved. The unchanged full suite was not
-rerun locally for this slice; the complete 77-test suite remains required on the
-hosted source gate. No Android tests ran locally. Focused reproduction is:
+The instrumentation diagnostic correction added eight focused inert tests: **69
+existing + 8 = 77**. Published source `65f048d5e573677d126403cd049ef88f7ec9d212`
+passed source gate `39688444556` with 77 inert tests and Components `39688444607`
+with 31 tests, against merge `95d57b03` and tree
+`225d0f6fc994e9714391aecf08fcfa63ecc85d87`. These gates were independently audited
+by the principal; they establish no namespace or Android execution.
+The cleanup candidate adds 12 inert reaping/controller tests: **77 + 12 = 89**.
+The source gate and complete 89-test inert suite pass locally. Of the original
+77 test methods, 76 retain identical ASTs; the orchestration test necessarily
+adds the new control before acquisition. Its bootstrap fixture helper also
+supplies the new PID-namespace identity. No original assertions were removed.
+No Android tests ran locally. Focused reproduction is:
 
 ```sh
 cd integrations/dps-native
 python3 -B -m unittest test_prepare.InstrumentationObservationTests -v
+python3 -B -m unittest test_prepare.ReapingShimTests -v
 ```
 
 The shims cover deferred signal delivery until child ownership is registered,
@@ -895,6 +903,91 @@ Both cancellation controls passed. These failures remain unresolved; the phase's
 `device_unchanged=false` is still an unreached comparison's default. Boot and
 installation do not establish passing JNI tests, main Map navigation, sensor or
 physical-positioning acceptance.
+
+### Private PID-1 group reaping candidate and hosted regression
+
+Source review identified a cleanup gap in the published fixture: its private
+PID-namespace controller is PID 1, but `Lifetime.drain()` waited only for the
+registered `Popen` leader. It did not wait for adopted descendants. Linux
+[`pid_namespaces(7)`](https://man7.org/linux/man-pages/man7/pid_namespaces.7.html)
+describes orphan adoption by namespace init, and
+[`waitpid(2)`](https://man7.org/linux/man-pages/man2/waitpid.2.html) describes
+reaping terminated children and selection by a negative process-group ID.
+These documentation references explain the source correction; they do not prove
+that any historical emulator survivor was a zombie. No upstream code is imported.
+
+The new per-`Lifetime` mode defaults false. The outer reviewed fixture records
+its PID-namespace identity as `parent_pidns` in existing `source.json`, independently
+of the unchanged seven-component host baseline. Before enabling reaping, bootstrap
+requires a present, strictly shaped binding, a different current PID namespace,
+`getpid()==1`, and private `/proc/self` resolving to `1`. These are fixed metadata
+reads, not process discovery. Missing/malformed bindings fail closed. Each normal
+phase enables the mode after its existing namespace guard and before workload
+execution. The parent supervisor and the two cancellation controls retain their
+default behavior. Credential drop, zero-capability checks and KVM scope remain
+unchanged.
+
+In that mode only, drain accepts a registered integer group ID greater than 1
+and at most `2**31-1`. After the existing leader wait sets its cached return code,
+the existing 0.75-second group-disappearance loop calls only
+`waitpid(-owned_pgid, WNOHANG)`, with at most 256 calls across that drain and a
+deadline check before each. It never calls a wildcard wait or changes the cached
+leader status. A zero return or `ECHILD` ends a reap pass, not the group check:
+the existing `killpg(pgid, 0)` disappearance proof still decides cleanup. Live or
+later-adopted children remain subject to the existing TERM/KILL/sleep loop; an
+exhausted deadline/call cap fails closed and retains ownership. No new signal
+target, process scan, zombie exemption or deadline extension is introduced.
+Existing original-error/cancellation precedence remains in force.
+
+A separate fixed `--inside-reaping-control` mode runs in the existing reviewed
+hosted workflow after the unchanged two cancellation cases and before acquisition.
+It uses the existing private PID/net/mounted-proc launcher, with a 15-second
+namespace bound and 17-second parent `run()` bound. It verifies the same PID-1
+binding, only-loopback private network, caller-owned state and original UID/GID,
+then permanently drops privileges with empty supplementary groups and zero
+effective/permitted/ambient capabilities. It neither activates loopback nor
+receives KVM access. No workflow YAML, SDK, native build or emulator is needed
+for this control.
+
+The fixed Python fixture creates an exited and a live adopted descendant in one
+registered group. Atomic private files and positive-PID nonblocking `waitid`
+observations with `WNOWAIT` establish adoption, exit status and liveness without
+consuming statuses. Each handshake is bounded to two seconds; child lifetimes
+also have finite bounds and remain contained by the namespace deadline. The
+disabled default must first produce the exact group-drain failure. The controller
+then enables the verified production reaper to clean that negative fixture and
+drains a fresh live/exited family with reaping enabled. This deliberate negative
+control is not a production retry or fallback. Two other registered groups must
+retain an unconsumed distinctive exit status and a live leader. Acceptance checks
+target-group disappearance, original leader statuses, the independent sentinel
+facts, all registered groups drained and private fixture-directory removal.
+
+The same verified reaper is enabled in `finally` after a setup/handshake failure,
+so failure does not intentionally abandon a registered fixture group. Cleanup
+uses the existing budget and error precedence. Unconfirmed groups or directory
+removal remain failures; PID-namespace teardown is a final containment boundary,
+not a substitute for the control's inner acceptance checks. The ordinary existing
+`run()` resource monitor is reused without new discovery/scanning logic.
+
+The parent requires the exact fixed receipt shape and true independent facts,
+then takes exactly one approved post-control host-baseline snapshot and uses the
+unchanged comparison. IPv6, KVM timestamps and firewall configuration rules are
+not relaxed. `group-reaping-result.json` and `group-reaping-control.json` remain
+source-bound, at most 16 KiB, and contain only fixed facts/statuses and existing
+baseline metadata/hashes. Private descendant PID files are nested and removed,
+never artifact-copied. The protected input helper adds only the fixed result name
+and eight fixed handshake names, retaining its owner/mode/regular-file/link,
+nonblocking/no-follow and 16 KiB checks. Existing finalizer JSON retention suffices.
+
+Twelve new local inert tests model identity guards, group-only waits after leader
+wait, unchanged parent behavior, delayed adoption, live/`ECHILD` cases, deadlines,
+the aggregate call cap, failure precedence, failed-handshake cleanup, independent
+control facts and exact post-control baseline rejection. No local fork, signal,
+namespace, credential change or workload runs. The actual hosted regression is
+**unrun**; the real adoption/reaping/status-isolation proof is still required.
+Historical instrumentation, cleanup and baseline failures remain unresolved.
+No Android/JNI, sensor, main Map navigation or positioning acceptance follows
+from the inert tests or this source correction.
 
 ### Catchable cancellation requirements and scoped hosted proof
 

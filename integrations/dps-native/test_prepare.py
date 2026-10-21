@@ -665,6 +665,218 @@ class OfflineDiagnosticTests(unittest.TestCase):
         self.assertEqual(json.loads((self.root / "offline-apk.json").read_text())["source"], self.source)
 
 
+class ReapingShimTests(unittest.TestCase):
+    """Inert syscall/child models only; no fork, namespace, signal or workload."""
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name); self.life = H.Lifetime()
+        self.enterContext(patch.object(H, "ACTIVE", self.life))
+        self.enterContext(patch.object(H.signal, "setitimer"))
+        self.enterContext(patch.object(H.signal, "getitimer", return_value=(0.0, 0.0)))
+
+    def child(self, pid=4321):
+        child = unittest.mock.Mock(pid=pid, returncode=None)
+        def wait(**kwargs): child.returncode = 31; return 31
+        child.wait.side_effect = wait
+        self.life.owned.append(child); return child
+
+    def test_private_pid1_requires_exact_nonmissing_namespace_binding_and_private_proc(self):
+        self.assertFalse(self.life.private_pid1)
+        for outer, current, process, proc_self in ((None, "pid:[2]", 1, "1"), ("pid:[0]", "pid:[2]", 1, "1"),
+                ("pid:[1]", "pid:[1]", 1, "1"), ("pid:[1]", "invalid", 1, "1"),
+                ("pid:[1]", "pid:[2]", 2, "1"), ("pid:[1]", "pid:[2]", 1, "123")):
+            with patch.object(H.os, "getpid", return_value=process), patch.object(H.os, "readlink", side_effect=lambda p: current if p.endswith("/pid") else proc_self):
+                with self.assertRaises(ValueError): self.life.enable_private_pid1(outer)
+                self.assertFalse(self.life.private_pid1)
+        with patch.object(H.os, "getpid", return_value=1), patch.object(H.os, "readlink", side_effect=["pid:[2]", "1"]) as reads:
+            self.life.enable_private_pid1("pid:[1]")
+        self.assertTrue(self.life.private_pid1)
+        self.assertEqual([c.args for c in reads.call_args_list], [("/proc/self/ns/pid",), ("/proc/self",)])
+
+    def test_default_parent_drain_never_uses_group_waitpid(self):
+        child = self.child()
+        with patch.object(H.os, "killpg", side_effect=[None, ProcessLookupError()]), patch.object(H.os, "waitpid") as reap:
+            self.life.drain(child)
+        reap.assert_not_called(); self.assertEqual(child.returncode, 31); self.assertEqual(self.life.owned, [])
+
+    def test_reaps_only_owned_group_after_leader_wait_without_consuming_other_status(self):
+        target, other = self.child(), self.child(8765); self.life.private_pid1 = True; events = []
+        def wait(**kwargs): events.append("leader_wait"); target.returncode = 31; return 31
+        target.wait.side_effect = wait
+        answers = iter([(5001, 42 << 8), (5002, 9), (0, 0)])
+        def reap(*args):
+            self.assertEqual(target.returncode, 31); events.append("reap"); return next(answers)
+        with patch.object(H.os, "killpg", side_effect=[None, ProcessLookupError()]), patch.object(H.os, "waitpid", side_effect=reap) as calls:
+            self.life.drain(target)
+        self.assertEqual(events, ["leader_wait", "reap", "reap", "reap"])
+        self.assertTrue(all(c.args == (-4321, H.os.WNOHANG) for c in calls.call_args_list))
+        self.assertEqual(target.returncode, 31); self.assertEqual(self.life.owned, [other])
+        self.assertIsNone(other.returncode); other.wait.assert_not_called()
+
+    def test_echild_or_running_child_never_substitutes_for_group_disappearance(self):
+        for error in (ChildProcessError(), None):
+            child = self.child(); self.life.private_pid1 = True; now = [0.0]
+            def sleep(seconds): now[0] += seconds
+            with patch.object(H.time, "monotonic", side_effect=lambda: now[0]), patch.object(H.time, "sleep", side_effect=sleep), \
+                 patch.object(H.os, "killpg") as kill, patch.object(H.os, "waitpid", side_effect=error, return_value=(0, 0)):
+                with self.assertRaisesRegex(ValueError, "PROCESS_GROUP_DRAIN"): self.life.drain(child)
+            self.assertIn(child, self.life.owned); self.assertEqual(child.returncode, 31)
+            self.assertTrue(all(call.args[0] == child.pid for call in kill.call_args_list))
+            self.assertLessEqual(now[0], 0.8); self.life.owned.clear()
+
+    def test_delayed_adoption_is_reaped_on_existing_next_iteration_with_same_deadline(self):
+        child = self.child(); self.life.private_pid1 = True; now = [0.0]; reaped = [False]
+        def kill(group, number):
+            self.assertEqual(group, child.pid)
+            if number == 0 and reaped[0]: raise ProcessLookupError()
+        def reap(group, flags):
+            if now[0] == 0: return (0, 0)
+            if not reaped[0]: reaped[0] = True; return (5001, 9)
+            raise ChildProcessError()
+        with patch.object(H.time, "monotonic", side_effect=lambda: now[0]), \
+             patch.object(H.time, "sleep", side_effect=lambda seconds: now.__setitem__(0, now[0] + seconds)), \
+             patch.object(H.os, "killpg", side_effect=kill) as kills, patch.object(H.os, "waitpid", side_effect=reap):
+            self.life.drain(child)
+        self.assertEqual(now[0], 0.05); self.assertEqual(self.life.owned, [])
+        self.assertIn(unittest.mock.call(child.pid, H.signal.SIGKILL), kills.call_args_list)
+
+    def test_total_nonblocking_reap_calls_are_capped_inside_old_budget(self):
+        child = self.child(); self.life.private_pid1 = True
+        with patch.object(H.time, "monotonic", return_value=0), patch.object(H.os, "killpg"), \
+             patch.object(H.os, "waitpid", return_value=(5001, 0)) as reap:
+            with self.assertRaisesRegex(ValueError, "PROCESS_GROUP_REAP_BOUND"): self.life.drain(child)
+        self.assertEqual(reap.call_count, 256); self.assertIn(child, self.life.owned)
+
+    def test_invalid_or_unregistered_group_never_waits_or_signals(self):
+        self.life.private_pid1 = True
+        for group in (1, 0, -1, True, "4321", 2**31):
+            child = self.child(group)
+            with patch.object(H.os, "killpg") as kill, patch.object(H.os, "waitpid") as reap:
+                with self.assertRaisesRegex(ValueError, "OWNED_REAP_GROUP"): self.life.drain(child)
+                kill.assert_not_called(); reap.assert_not_called()
+            self.life.owned.clear()
+        child = unittest.mock.Mock(pid=4321)
+        with patch.object(H.os, "killpg") as kill:
+            with self.assertRaisesRegex(ValueError, "OWNED_REAP_GROUP"): self.life.drain(child)
+            kill.assert_not_called()
+
+    def test_reap_error_or_cleanup_deadline_keeps_ownership_and_original_failure(self):
+        for failure in (OSError(errno.EIO, "inert"), H.CleanupDeadline("CLEANUP_DEADLINE"), H.Interrupted("HOSTED_INTERRUPTED")):
+            child = self.child(); self.life.private_pid1 = True
+            with patch.object(H.os, "killpg"), patch.object(H.os, "waitpid", side_effect=failure):
+                with self.assertRaises(type(failure)) as caught: self.life.drain(child)
+                self.assertIs(caught.exception, failure)
+            self.assertIn(child, self.life.owned); self.life.owned.clear()
+        with patch.object(self.life, "drain_all", side_effect=H.CleanupDeadline("CLEANUP_DEADLINE")), \
+             patch.object(H.signal, "signal"), patch.object(H.signal, "getsignal", return_value=H.signal.SIG_DFL):
+            with self.assertRaisesRegex(ValueError, "ORIGINAL_FAILURE"):
+                with self.life: raise ValueError("ORIGINAL_FAILURE")
+
+    def control_bootstrap(self):
+        owner = self.root.stat(); source = "a" * 40
+        values = {"source.json": dict(map=source, parent_pidns="pid:[1]"),
+            "baseline.json": dict(netns="net:[host]", credentials=dict(uid=[owner.st_uid] * 3, gid=[owner.st_gid] * 3), kvm=dict(kvm_gid=78)),
+            "environment.json": dict(GITHUB_SHA=source)}
+        for name, value in values.items(): self.write_json(self.root / name, value)
+        self.enterContext(patch.dict(H.os.environ, dict(SUDO_UID=str(owner.st_uid), SUDO_GID=str(owner.st_gid))))
+        self.enterContext(patch.object(H.os, "getuid", return_value=0)); self.enterContext(patch.object(H.os, "geteuid", return_value=0))
+        self.enterContext(patch.object(H.os, "getpid", return_value=1))
+        self.enterContext(patch.object(H.os, "readlink", side_effect=lambda p: {"/proc/self/ns/pid": "pid:[2]", "/proc/self": "1", "/proc/self/ns/net": "net:[private]"}[p]))
+        self.enterContext(patch.object(H.socket, "if_nameindex", return_value=[(1, "lo")]))
+        self.enterContext(patch.object(H, "drop_credentials")); self.enterContext(patch.object(H, "activate_environment")); self.enterContext(patch.object(H, "guards"))
+        return source
+
+    def write_json(self, path, value):
+        fd = H.os.open(path, H.os.O_WRONLY | H.os.O_CREAT | H.os.O_EXCL, 0o600)
+        try: H.os.write(fd, json.dumps(value).encode())
+        finally: H.os.close(fd)
+
+    def test_control_handshake_failure_still_enables_verified_reaper_and_removes_owned_case(self):
+        self.control_bootstrap(); now = [0.0]
+        def spawn(*args, **kwargs): return self.child(100 + len(self.life.owned))
+        def clock(): now[0] += 0.1; return now[0]
+        with patch.object(self.life, "spawn", side_effect=spawn), patch.object(self.life, "drain_all", side_effect=self.life.owned.clear), \
+             patch.object(H.time, "monotonic", side_effect=clock), patch.object(H.time, "sleep"):
+            with self.assertRaisesRegex(ValueError, "REAPING_HANDSHAKE_BOUND"): H.inside_reaping_control(self.root)
+        result = json.loads((self.root / "group-reaping-result.json").read_text())
+        self.assertFalse(result["success"]); self.assertTrue(self.life.private_pid1)
+        self.assertEqual(result["primary_failure"], "REAPING_HANDSHAKE_BOUND")
+        self.assertTrue(result["registered_groups_drained"]); self.assertTrue(result["private_state_removed"])
+        self.assertFalse((self.root / "group-reaping-private").exists())
+
+    def test_control_negative_positive_and_other_group_status_require_independent_facts(self):
+        self.control_bootstrap(); groups = {}; removed = set(); calls = []
+        def spawn(argv, **kwargs):
+            role = argv[-1]; group = 100 + len(groups); child = self.child(group); groups[role] = child
+            case = self.root / "group-reaping-private"
+            if role in ("negative", "positive"):
+                self.write_json(case / (role + "-family.json"), dict(leader=group, pgid=group, exited=group * 10 + 1, live=group * 10 + 2))
+                for kind, child_pid in (("exited", group * 10 + 1), ("live", group * 10 + 2)):
+                    self.write_json(case / (role + "-" + kind + ".json"), dict(pid=child_pid, pgid=group, adopted=True))
+            else:
+                self.write_json(case / (role + ".json"), dict(pid=group, pgid=group))
+                if role == "exit-sentinel":
+                    def wait(**kwargs): child.returncode = 23; return 23
+                    child.wait.side_effect = wait
+                else: child.poll.return_value = None
+            return child
+        def waitid(kind, pid, flags):
+            self.assertEqual(kind, H.os.P_PID); self.assertEqual(flags, H.os.WEXITED | H.os.WNOHANG | H.os.WNOWAIT)
+            status = 23 if pid == groups["exit-sentinel"].pid else 42 if pid % 10 == 1 and pid > 1000 else None
+            return None if status is None else SimpleNamespace(si_pid=pid, si_code=H.os.CLD_EXITED, si_status=status)
+        def drain(child):
+            calls.append((child.pid, self.life.private_pid1))
+            if child is groups.get("negative") and not self.life.private_pid1: raise ValueError("PROCESS_GROUP_DRAIN")
+            removed.add(child.pid); self.life.owned.remove(child)
+        def kill(group, number):
+            self.assertEqual(number, 0)
+            if group in removed: raise ProcessLookupError()
+        with patch.object(self.life, "spawn", side_effect=spawn), patch.object(self.life, "drain", side_effect=drain), \
+             patch.object(H.os, "waitid", side_effect=waitid), patch.object(H.os, "killpg", side_effect=kill):
+            H.inside_reaping_control(self.root)
+        result = json.loads((self.root / "group-reaping-result.json").read_text())
+        self.assertTrue(result["success"]); self.assertEqual(self.life.owned, [])
+        self.assertEqual(calls[:3], [(groups["negative"].pid, False), (groups["negative"].pid, True), (groups["positive"].pid, True)])
+        self.assertTrue(result["sentinel_live_preserved"]); self.assertTrue(result["sentinel_exit_status_preserved"])
+        self.assertNotIn("pid", json.dumps(result).replace("private_pid1_verified", ""))
+
+    def test_parent_control_requires_exact_facts_and_exact_post_control_baseline(self):
+        facts = ("success", "private_pid1_verified", "negative_failed_closed", "negative_group_gone", "positive_group_gone",
+            "adopted_exited_verified", "adopted_live_verified", "leader_status_preserved", "sentinel_exit_status_preserved",
+            "sentinel_live_preserved", "registered_groups_drained", "private_state_removed")
+        source = "a" * 40
+        result = dict(schema=1, source=source, primary_failure=None, cleanup_error=None, **dict.fromkeys(facts, True))
+        self.write_json(self.root / "group-reaping-result.json", result)
+        before, after = dict(fixed="before"), dict(fixed="after")
+        with patch.object(H, "guards"), patch.object(H, "run") as run, patch.object(H, "baseline", return_value=after) as capture, \
+             patch.object(H, "baseline_unchanged", return_value=False) as equal, patch.object(H, "baseline_diagnostic", return_value={"closed": True}):
+            with self.assertRaisesRegex(ValueError, "REAPING_CONTROL_BASELINE"):
+                H.group_reaping_control(self.root, dict(GITHUB_SHA=source), before)
+        capture.assert_called_once_with(); equal.assert_called_once_with(before, after)
+        self.assertEqual(run.call_args.args[0], "group-reaping-namespace"); self.assertEqual(run.call_args.kwargs, dict(seconds=17))
+        self.assertIn("--net", run.call_args.args[1]); self.assertIn("--pid", run.call_args.args[1])
+        self.assertFalse(json.loads((self.root / "group-reaping-control.json").read_text())["success"])
+        with patch.object(H, "guards"), patch.object(H, "run"), patch.object(H, "baseline", return_value=after), \
+             patch.object(H, "baseline_unchanged", return_value=True), patch.object(H, "baseline_diagnostic", return_value={"closed": True}):
+            H.group_reaping_control(self.root, dict(GITHUB_SHA=source), before)
+        self.assertTrue(json.loads((self.root / "group-reaping-control.json").read_text())["success"])
+        for key in facts:
+            result[key] = False
+            with patch.object(H, "guards"), patch.object(H, "run"), patch.object(H, "private_document", return_value=result), patch.object(H, "baseline") as capture:
+                with self.assertRaisesRegex(ValueError, "REAPING_CONTROL_RESULT"):
+                    H.group_reaping_control(self.root, dict(GITHUB_SHA=source), before)
+                capture.assert_not_called()
+            result[key] = True
+
+    def test_control_entry_rejects_local_context_before_any_process_or_namespace(self):
+        with patch.object(H.os, "getpid", return_value=4321), patch.object(self.life, "spawn") as spawn:
+            with self.assertRaises(ValueError): H.inside_reaping_control(self.root)
+            spawn.assert_not_called()
+        with patch.object(H, "run") as run, patch.object(H, "baseline") as baseline:
+            with self.assertRaises(ValueError): H.group_reaping_control(self.root, {}, {})
+            run.assert_not_called(); baseline.assert_not_called()
+
+
 class InstrumentationObservationTests(unittest.TestCase):
     """Existing-output protocol fixtures only; no runner or Android execution."""
     methods = ("actualRustJniGoldensAndClosedErrors", "strictSummaryRejectsUnknownOrContradictoryFields",
@@ -1114,8 +1326,9 @@ class KvmShimTests(unittest.TestCase):
              patch.object(H.os, "getpid", return_value=1), patch.object(H.os, "open", side_effect=[22, 23]), \
              patch.object(H.os, "fstat", side_effect=[owner, receipt]), patch.object(H.os, "close"), \
              patch.object(H.os, "write", side_effect=lambda fd, raw: len(raw)), \
-             patch.object(H.os, "readlink", return_value=namespace), patch.object(H.socket, "if_nameindex", return_value=links), \
-             patch.object(H, "private_document", side_effect=[outer, dict(map="a" * 40)]), \
+             patch.object(H.os, "readlink", side_effect=lambda p: {"/proc/self/ns/net": namespace,
+                 "/proc/self/ns/pid": "pid:[2]", "/proc/self": "1"}[p]), patch.object(H.socket, "if_nameindex", return_value=links), \
+             patch.object(H, "private_document", side_effect=[outer, dict(map="a" * 40, parent_pidns="pid:[1]")]), \
              patch.object(H, "kvm_snapshot", return_value=self.expected), \
              patch.object(H, "drop_credentials", side_effect=drop) as dropped, \
              patch.object(H.subprocess, "run", side_effect=lambda *args, **kwargs: events.append("loopback")) as command:
@@ -1354,10 +1567,11 @@ class KvmShimTests(unittest.TestCase):
              patch.object(H, "kvm_admission", return_value=self.expected), patch.object(H, "baseline", return_value=before), \
              patch.object(H, "run_phase", side_effect=lambda state, phase, *_: observed.append(phase)), \
              patch.object(H, "cancellation_control", side_effect=lambda *_: observed.append("cancellation")), \
+             patch.object(H, "group_reaping_control", side_effect=lambda *_: observed.append("group-reaping")), \
              patch.object(H, "acquire_build") as build, patch.object(H, "finalize") as finalizer:
             H.main()
             build.assert_not_called(); finalizer.assert_called_once()
-        self.assertEqual(observed, ["kvm-probe", "cancellation", "public-build", "offline-build", "emulator"])
+        self.assertEqual(observed, ["kvm-probe", "cancellation", "group-reaping", "public-build", "offline-build", "emulator"])
 
 
 if __name__ == "__main__":

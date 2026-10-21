@@ -237,6 +237,14 @@ class CleanupDeadline(RuntimeError):
     pass
 
 
+def private_pid1_identity(parent_pidns):
+    require(type(parent_pidns) is str and re.fullmatch(r"pid:\[[1-9][0-9]{0,19}\]", parent_pidns), "PRIVATE_PIDNS_BINDING")
+    current = os.readlink("/proc/self/ns/pid")
+    require(re.fullmatch(r"pid:\[[1-9][0-9]{0,19}\]", current) and current != parent_pidns
+            and os.getpid() == 1 and os.readlink("/proc/self") == "1", "PRIVATE_PID1_REQUIRED")
+    return current
+
+
 ACTIVE = None
 
 
@@ -257,6 +265,11 @@ class Lifetime:
         self.handlers = {}
         self.stop = None
         self.cleanup_errors = []
+        self.private_pid1 = False
+
+    def enable_private_pid1(self, parent_pidns):
+        private_pid1_identity(parent_pidns)
+        self.private_pid1 = True
 
     def __enter__(self):
         blocked = int(Path("/proc/self/status").read_text().split("SigBlk:")[1].split()[0], 16)
@@ -327,6 +340,9 @@ class Lifetime:
                 signal.setitimer(signal.ITIMER_REAL, 0)
 
     def drain(self, child):
+        if self.private_pid1:
+            require(child in self.owned and type(child.pid) is int and 1 < child.pid <= 2**31 - 1,
+                    "OWNED_REAP_GROUP")
         def terminate(sig):
             try:
                 os.killpg(child.pid, sig)
@@ -344,7 +360,19 @@ class Lifetime:
             terminate(signal.SIGKILL)
             child.wait(timeout=0.75)
         stop = time.monotonic() + 0.75
+        reap_calls = 0
         while True:
+            if self.private_pid1:
+                require(type(child.returncode) is int, "REAP_AFTER_LEADER_WAIT")
+                while reap_calls < 256:
+                    require(time.monotonic() < stop, "PROCESS_GROUP_DRAIN")
+                    reap_calls += 1
+                    try:
+                        waited, _status = os.waitpid(-child.pid, os.WNOHANG)
+                    except ChildProcessError:
+                        break
+                    if waited == 0:
+                        break
             try:
                 os.killpg(child.pid, 0)
             except ProcessLookupError:
@@ -352,6 +380,8 @@ class Lifetime:
             except PermissionError:
                 pass
             require(time.monotonic() < stop, "PROCESS_GROUP_DRAIN")
+            if self.private_pid1:
+                require(reap_calls < 256, "PROCESS_GROUP_REAP_BOUND")
             terminate(signal.SIGKILL)
             time.sleep(0.05)
         self.owned.remove(child)
@@ -1108,7 +1138,9 @@ def emulator_trial(state, env):
 
 
 def private_document(directory_fd, name, owner, *, receipt_phase=None):
-    allowed = name in ("baseline.json", "source.json", "environment.json") if receipt_phase is None else (
+    allowed = name in ("baseline.json", "source.json", "environment.json", "group-reaping-result.json",
+        "negative-family.json", "positive-family.json", "exit-sentinel.json", "live-sentinel.json",
+        "negative-exited.json", "negative-live.json", "positive-exited.json", "positive-live.json") if receipt_phase is None else (
         receipt_phase in PHASES and name == "phase-" + receipt_phase + ".json")
     require(allowed, "PHASE_INPUT_ALLOWLIST")
     fd, original = None, None
@@ -1169,11 +1201,13 @@ def phase_child(state, phase):
         outer = private_document(directory_fd, "baseline.json", owner)
         require(outer["credentials"]["uid"] == [owner.st_uid] * 3
                 and outer["credentials"]["gid"] == [owner.st_gid] * 3, "PHASE_ORIGINAL_AUTHORITY")
-        source = private_document(directory_fd, "source.json", owner).get("map")
+        source_document = private_document(directory_fd, "source.json", owner)
+        source = source_document.get("map")
         require(isinstance(source, str) and re.fullmatch("[0-9a-f]{40}", source), "PHASE_SOURCE_SHAPE")
         result["source"] = source
         same_network = os.readlink("/proc/self/ns/net") == outer["netns"]
         require(same_network == (phase == "public-build"), "PHASE_NETWORK_NAMESPACE")
+        ACTIVE.enable_private_pid1(source_document.get("parent_pidns"))
         if not same_network:
             require(sorted(n for _, n in socket.if_nameindex()) == ["lo"], "PHASE_PRIVATE_LINKS")
             if phase in ("offline-build", "emulator"):
@@ -1402,7 +1436,7 @@ def finalize(state, evidence, before, complete, original, control_mode=None):
 
 
 def namespace_command(mode, state, seconds):
-    require(mode in ("--inside-cancellation", *("--inside-" + phase for phase in PHASES)), "NAMESPACE_MODE")
+    require(mode in ("--inside-cancellation", "--inside-reaping-control", *("--inside-" + phase for phase in PHASES)), "NAMESPACE_MODE")
     network = [] if mode == "--inside-public-build" else ["--net"]
     return ["sudo", "-n", "timeout", "--signal=TERM", "--kill-after=1s", str(seconds) + "s",
             "unshare", *network, "--pid", "--fork", "--mount-proc", "--kill-child=KILL",
@@ -1520,10 +1554,212 @@ def cancellation_control(state, env):
         android_executed=False, hard_kill_cleanup_guaranteed=False))
 
 
+REAPING_FIXTURE = r'''
+import json, os, signal, sys, time
+from pathlib import Path
+case, role = Path(sys.argv[1]), sys.argv[2]
+def publish(name, value):
+    raw = json.dumps(value).encode()
+    fd = os.open(case / (name + ".part"), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    try:
+        if os.write(fd, raw) != len(raw): raise RuntimeError("FIXTURE_WRITE")
+    finally: os.close(fd)
+    os.rename(case / (name + ".part"), case / name)
+if role in ("negative", "positive"):
+    descendants = {}
+    for kind in ("exited", "live"):
+        pid = os.fork()
+        if pid == 0:
+            if kind == "live": signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            stop = time.monotonic() + 2
+            while os.getppid() != 1:
+                if time.monotonic() >= stop: os._exit(90)
+                time.sleep(0.005)
+            publish(role + "-" + kind + ".json", dict(pid=os.getpid(), pgid=os.getpgrp(), adopted=True))
+            if kind == "exited": os._exit(42)
+            time.sleep(30); os._exit(91)
+        descendants[kind] = pid
+    publish(role + "-family.json", dict(leader=os.getpid(), pgid=os.getpgrp(), **descendants))
+    os._exit(31)
+elif role in ("exit-sentinel", "live-sentinel"):
+    publish(role + ".json", dict(pid=os.getpid(), pgid=os.getpgrp()))
+    if role == "exit-sentinel": os._exit(23)
+    time.sleep(30); os._exit(92)
+else:
+    os._exit(93)
+'''
+
+
+def inside_reaping_control(state):
+    """Hosted-only kernel control, with private PID values never exported."""
+    require(os.getuid() == os.geteuid() == 0 and os.getpid() == 1, "REAPING_BOOTSTRAP_ROOT")
+    owner = state.lstat()
+    require(state.resolve(strict=True) == state and stat.S_ISDIR(owner.st_mode)
+            and stat.S_IMODE(owner.st_mode) == 0o700 and owner.st_uid > 0 and owner.st_gid > 0
+            and os.environ.get("SUDO_UID") == str(owner.st_uid) and os.environ.get("SUDO_GID") == str(owner.st_gid), "REAPING_STATE_OWNER")
+    directory, case_fd, case_created, verified, unprivileged = None, None, False, False, False
+    source, parent_pidns, cleanup_error = None, None, None
+    case = state / "group-reaping-private"
+    result = dict(schema=1, source=None, success=False, private_pid1_verified=False, negative_failed_closed=False,
+        negative_group_gone=False, positive_group_gone=False, adopted_exited_verified=False, adopted_live_verified=False,
+        leader_status_preserved=False, sentinel_exit_status_preserved=False, sentinel_live_preserved=False,
+        registered_groups_drained=False, private_state_removed=False, primary_failure=None, cleanup_error=None)
+    try:
+        with ACTIVE.registration():
+            directory = os.open(state, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW)
+        require(device_identity(os.fstat(directory)) == device_identity(owner), "REAPING_STATE_CHANGED")
+        binding = private_document(directory, "source.json", owner)
+        source, parent_pidns = binding.get("map"), binding.get("parent_pidns")
+        require(type(source) is str and re.fullmatch("[0-9a-f]{40}", source), "REAPING_SOURCE")
+        result["source"] = source
+        private_pid1_identity(parent_pidns); verified = True; result["private_pid1_verified"] = True
+        require(not ACTIVE.private_pid1, "REAPING_NEGATIVE_DEFAULT")
+        outer = private_document(directory, "baseline.json", owner)
+        require(outer["credentials"]["uid"] == [owner.st_uid] * 3 and outer["credentials"]["gid"] == [owner.st_gid] * 3
+                and os.readlink("/proc/self/ns/net") != outer["netns"]
+                and sorted(n for _, n in socket.if_nameindex()) == ["lo"], "REAPING_PRIVATE_NAMESPACE")
+        env = private_document(directory, "environment.json", owner)
+        require(env["GITHUB_SHA"] == source, "REAPING_SOURCE")
+        drop_credentials(owner.st_uid, owner.st_gid, "offline-build", outer["kvm"]); unprivileged = True
+        activate_environment(env); guards(env)
+        case.mkdir(mode=0o700); case_created = True
+        with ACTIVE.registration():
+            case_fd = os.open(case, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW)
+        case_owner = os.fstat(case_fd)
+        require(stat.S_ISDIR(case_owner.st_mode) and stat.S_IMODE(case_owner.st_mode) == 0o700
+                and case_owner.st_uid == owner.st_uid and case_owner.st_gid == owner.st_gid, "REAPING_CASE_OWNER")
+        def document(name):
+            stop = time.monotonic() + 2
+            while not (case / name).exists():
+                ACTIVE.check(); require(time.monotonic() < stop, "REAPING_HANDSHAKE_BOUND"); time.sleep(0.005)
+            return private_document(case_fd, name, case_owner)
+        def fixture(role):
+            return ACTIVE.spawn(["/usr/bin/python3", "-B", "-c", REAPING_FIXTURE, case, role], env=env,
+                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        def pid(value):
+            require(type(value) is int and 1 < value <= 2**31 - 1, "REAPING_FIXTURE_PID"); return value
+        def observation(child_pid):
+            return os.waitid(os.P_PID, pid(child_pid), os.WEXITED | os.WNOHANG | os.WNOWAIT)
+        def exited(child_pid, status):
+            stop = time.monotonic() + 2
+            while True:
+                value = observation(child_pid)
+                if value is not None:
+                    require(value.si_pid == child_pid and value.si_code == os.CLD_EXITED and value.si_status == status,
+                            "REAPING_EXIT_STATUS"); return
+                ACTIVE.check(); require(time.monotonic() < stop, "REAPING_HANDSHAKE_BOUND"); time.sleep(0.005)
+        def gone(group):
+            try: os.killpg(group, 0)
+            except ProcessLookupError: return True
+            return False
+        def family(role):
+            child = fixture(role)
+            details = document(role + "-family.json")
+            require(set(details) == {"leader", "pgid", "exited", "live"}
+                    and details["leader"] == details["pgid"] == child.pid
+                    and len({pid(details[key]) for key in ("leader", "exited", "live")}) == 3, "REAPING_FAMILY_BINDING")
+            require(child.wait(timeout=2) == 31, "REAPING_LEADER_STATUS")
+            for kind in ("exited", "live"):
+                child_pid = pid(details[kind]); ready = document(role + "-" + kind + ".json")
+                require(ready == dict(pid=child_pid, pgid=child.pid, adopted=True), "REAPING_ADOPTION_BINDING")
+            exited(details["exited"], 42)
+            require(observation(details["live"]) is None, "REAPING_LIVE_REQUIRED")
+            return child
+        sentinel_exit, sentinel_live = fixture("exit-sentinel"), fixture("live-sentinel")
+        for role, child in (("exit-sentinel", sentinel_exit), ("live-sentinel", sentinel_live)):
+            require(document(role + ".json") == dict(pid=child.pid, pgid=child.pid), "REAPING_SENTINEL_BINDING")
+        exited(sentinel_exit.pid, 23)
+        negative = family("negative")
+        result.update(adopted_exited_verified=True, adopted_live_verified=True)
+        with ACTIVE.cleanup():
+            try: ACTIVE.drain(negative)
+            except ValueError as error:
+                require(error.args == ("PROCESS_GROUP_DRAIN",) and negative in ACTIVE.owned and not gone(negative.pid),
+                        "REAPING_NEGATIVE_FAILURE")
+                result["negative_failed_closed"] = True
+            require(result["negative_failed_closed"], "REAPING_NEGATIVE_REQUIRED")
+            ACTIVE.enable_private_pid1(parent_pidns)
+            ACTIVE.drain(negative)
+        result["negative_group_gone"] = gone(negative.pid)
+        positive = family("positive")
+        with ACTIVE.cleanup(): ACTIVE.drain(positive)
+        result.update(positive_group_gone=gone(positive.pid), leader_status_preserved=negative.returncode == positive.returncode == 31,
+                      sentinel_live_preserved=sentinel_live.poll() is None)
+        # WNOWAIT above must not have consumed this other group's actual status.
+        result["sentinel_exit_status_preserved"] = sentinel_exit.returncode is None and sentinel_exit.wait(timeout=2) == 23
+        require(all(result[key] is True for key in ("negative_group_gone", "positive_group_gone", "leader_status_preserved",
+                "sentinel_live_preserved", "sentinel_exit_status_preserved")), "REAPING_CONTROL_FACTS")
+        result["success"] = True
+    finally:
+        original = sys.exc_info()[1]
+        try:
+            with ACTIVE.cleanup():
+                # Also reaps adopted descendants after setup/negative failures.
+                if verified and not ACTIVE.private_pid1: ACTIVE.enable_private_pid1(parent_pidns)
+                ACTIVE.drain_all(); result["registered_groups_drained"] = not ACTIVE.owned
+                if case_fd is not None:
+                    os.close(case_fd); case_fd = None
+                if case_created: shutil.rmtree(case)
+                result["private_state_removed"] = not case.exists()
+        except BaseException as error:
+            cleanup_error = error
+        for fd in (case_fd, directory):
+            if fd is not None:
+                try:
+                    with ACTIVE.cleanup(): os.close(fd)
+                except BaseException as error:
+                    if cleanup_error is None: cleanup_error = error
+        result.update(primary_failure=failure_code(original), cleanup_error=failure_code(cleanup_error),
+            success=result["success"] and original is None and cleanup_error is None
+                    and result["registered_groups_drained"] and result["private_state_removed"] and ACTIVE.first_signal is None)
+        if unprivileged:
+            try:
+                with ACTIVE.cleanup():
+                    require(len((json.dumps(result, indent=2, sort_keys=True) + "\n").encode()) <= 16384, "REAPING_RECEIPT_BOUND")
+                    save(state / "group-reaping-result.json", result)
+            except BaseException:
+                if original is None and cleanup_error is None: raise
+        if original is None and cleanup_error is not None: raise cleanup_error
+
+
+def group_reaping_control(state, env, before):
+    guards(env)
+    run("group-reaping-namespace", namespace_command("--inside-reaping-control", state, 15), state, env, seconds=17)
+    with ACTIVE.registration():
+        directory = os.open(state, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    original = None
+    try:
+        result = private_document(directory, "group-reaping-result.json", os.fstat(directory))
+    except BaseException as error:
+        original = error
+        raise
+    finally:
+        try:
+            with ACTIVE.cleanup(): os.close(directory)
+        except BaseException:
+            if original is None: raise
+    facts = ("success", "private_pid1_verified", "negative_failed_closed", "negative_group_gone", "positive_group_gone",
+        "adopted_exited_verified", "adopted_live_verified", "leader_status_preserved", "sentinel_exit_status_preserved",
+        "sentinel_live_preserved", "registered_groups_drained", "private_state_removed")
+    require(set(result) == {"schema", "source", "primary_failure", "cleanup_error", *facts}
+            and type(result["schema"]) is int and result["schema"] == 1 and result["source"] == env["GITHUB_SHA"]
+            and result["primary_failure"] is None and result["cleanup_error"] is None
+            and all(result[key] is True for key in facts) and not (state / "group-reaping-private").exists(), "REAPING_CONTROL_RESULT")
+    after = baseline()
+    unchanged = baseline_unchanged(before, after)
+    receipt = dict(schema=1, source=env["GITHUB_SHA"], success=unchanged, actual_hosted_processes=True,
+        namespace_result=result, baseline_comparison=baseline_diagnostic(before, after, None), android_executed=False)
+    require(len((json.dumps(receipt, indent=2, sort_keys=True) + "\n").encode()) <= 16384, "REAPING_RECEIPT_BOUND")
+    save(state / "group-reaping-control.json", receipt)
+    require(unchanged, "REAPING_CONTROL_BASELINE")
+
+
 def main():
     os.umask(0o077)
     if len(sys.argv) == 3 and sys.argv[1] == "--inside-cancellation":
         inside_cancellation(Path(sys.argv[2])); return
+    if len(sys.argv) == 3 and sys.argv[1] == "--inside-reaping-control":
+        inside_reaping_control(Path(sys.argv[2])); return
     if len(sys.argv) == 3 and sys.argv[1] in tuple("--inside-" + phase for phase in PHASES):
         phase_child(Path(sys.argv[2]), sys.argv[1].removeprefix("--inside-")); return
     if len(sys.argv) == 5 and sys.argv[1] == "--cancellation-child":
@@ -1537,7 +1773,8 @@ def main():
         with ACTIVE.registration():
             state.mkdir(mode=0o700); created = True
         save(state / "source.json", dict(map=os.environ["GITHUB_SHA"], pins=pins(),
-            workflow=WORKFLOW, run=os.environ["GITHUB_RUN_ID"], attempt=os.environ["GITHUB_RUN_ATTEMPT"]))
+            workflow=WORKFLOW, run=os.environ["GITHUB_RUN_ID"], attempt=os.environ["GITHUB_RUN_ATTEMPT"],
+            parent_pidns=os.readlink("/proc/self/ns/pid")))
         admitted = kvm_admission(state)
         before = baseline(); require(before["kvm"] == admitted, "KVM_DEVICE_CHANGED")
         save(state / "baseline.json", before)
@@ -1547,6 +1784,7 @@ def main():
         save(state / "environment.json", env)
         run_phase(state, "kvm-probe", env, 10)  # Before any SDK acquisition/build.
         cancellation_control(state, env)
+        group_reaping_control(state, env, before)
         run_phase(state, "public-build", env, 2700)
         env = json.loads((state / "environment.json").read_text())
         run_phase(state, "offline-build", env, 1220)

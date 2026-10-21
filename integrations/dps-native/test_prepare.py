@@ -509,6 +509,162 @@ class BaselineDiagnosticShimTests(unittest.TestCase):
                             result["baseline_comparison"]["after"]["firewall"]["raw"])
 
 
+class OfflineDiagnosticTests(unittest.TestCase):
+    """Inert text files and mocked build calls; no Gradle or namespace execution."""
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.life = H.Lifetime()
+        self.enterContext(patch.object(H, "ACTIVE", self.life))
+        self.enterContext(patch.object(H.signal, "setitimer"))
+        self.enterContext(patch.object(H.signal, "getitimer", return_value=(0.0, 0.0)))
+        self.source = "a" * 40
+        self.summary = dict(exit=1, peak_observed_rss=100, wall_bound_seconds=1200,
+            owned_process_group_drained=True, signal_count=0, cleanup_error=None)
+
+    def fixtures(self, raw):
+        for name, value in (("android-offline-rebuild.json", json.dumps(self.summary).encode()),
+                            ("android-offline-rebuild.private.log", raw)):
+            fd = H.os.open(self.root / name, H.os.O_CREAT | H.os.O_TRUNC | H.os.O_WRONLY, 0o600)
+            try: H.os.write(fd, value)
+            finally: H.os.close(fd)
+
+    def test_complete_capture_is_bounded_private_and_retained_after_original_failure(self):
+        raw = b"SECRET_URL https://private.invalid/path\nUnable to start the daemon process\njava.net.BindException"
+        self.fixtures(raw)
+        original = ValueError("STEP_ANDROID-OFFLINE-REBUILD")
+        with patch.object(H, "run", side_effect=original):
+            with self.assertRaises(ValueError) as caught:
+                H.offline_build(self.root, dict(GITHUB_SHA=self.source))
+        self.assertIs(caught.exception, original)
+        diagnostic = json.loads((self.root / "offline-build-diagnostic.json").read_text())
+        self.assertEqual(diagnostic["source"], self.source); self.assertIsNone(diagnostic["capture_error"])
+        self.assertEqual(diagnostic["coverage"], "COMPLETE")
+        self.assertEqual(diagnostic["log_bytes"], len(raw)); self.assertEqual(diagnostic["read_bytes"], len(raw))
+        self.assertEqual(diagnostic["complete_log_fingerprint"], P.digest(raw))
+        self.assertEqual(diagnostic["observed_markers"], ["GRADLE_DAEMON_START", "LOCAL_SOCKET_BIND"])
+        self.assertLessEqual((self.root / "offline-build-diagnostic.json").stat().st_size, 16384)
+        self.assertNotIn("SECRET_URL", json.dumps(diagnostic)); self.assertNotIn("https://", json.dumps(diagnostic))
+        evidence = self.root.parent / (self.root.name + "-evidence")
+        self.addCleanup(lambda: __import__("shutil").rmtree(evidence, ignore_errors=True))
+        with patch.object(self.life, "drain_all"), patch.object(H, "baseline", return_value=dict(inert=True)):
+            result = H.finalize(self.root, evidence, dict(inert=True), False, original)
+        self.assertEqual(result["primary_failure"], "ValueError"); self.assertFalse(result["success"])
+        self.assertEqual(json.loads((evidence / "offline-build-diagnostic.json").read_text()), diagnostic)
+        self.assertFalse((evidence / "android-offline-rebuild.private.log").exists())
+        self.assertFalse(self.root.exists())
+
+    def test_prefix_tail_coverage_does_not_invent_markers_across_unread_middle(self):
+        raw = (b"x" * (32768 - len(b"Dependency verifi")) + b"Dependency verifi"
+               + b"No cached version SECRET_MIDDLE" * 100 + b"cation failed" + b"x" * (32768 - len(b"cation failed")))
+        self.fixtures(raw)
+        diagnostic = H.offline_failure_diagnostic(self.root, self.source)
+        self.assertIsNone(diagnostic["capture_error"]); self.assertEqual(diagnostic["coverage"], "PREFIX_TAIL")
+        self.assertEqual(diagnostic["read_bytes"], 65536); self.assertEqual(diagnostic["log_bytes"], len(raw))
+        self.assertIsNone(diagnostic["complete_log_fingerprint"]); self.assertEqual(diagnostic["observed_markers"], [])
+        self.assertEqual(diagnostic["windows"], [dict(offset=0, **P.digest(raw[:32768])),
+            dict(offset=len(raw) - 32768, **P.digest(raw[-32768:]))])
+
+    def test_empty_and_window_boundaries_have_exact_read_counts_and_full_hash_only_when_complete(self):
+        for size in (0, 32768, 32769, 65536, 65537):
+            with self.subTest(size=size):
+                raw = b"x" * size; self.fixtures(raw)
+                with patch.object(H.os, "read", wraps=H.os.read) as read:
+                    diagnostic = H.offline_failure_diagnostic(self.root, self.source)
+                self.assertIsNone(diagnostic["capture_error"])
+                self.assertEqual(diagnostic["read_bytes"], min(size, 65536))
+                self.assertTrue(all(call.args[1] <= 32768 for call in read.call_args_list))
+                self.assertEqual(diagnostic["complete_log_fingerprint"], P.digest(raw) if size <= 65536 else None)
+
+    def test_undrained_failed_command_never_opens_private_log(self):
+        for mode in ("summary", "owned"):
+            with self.subTest(mode=mode):
+                self.summary["owned_process_group_drained"] = mode != "summary"
+                self.fixtures(b"private")
+                self.life.owned = [unittest.mock.Mock()] if mode == "owned" else []
+                with patch.object(H.os, "open", wraps=H.os.open) as opened:
+                    diagnostic = H.offline_failure_diagnostic(self.root, self.source)
+                self.assertEqual(diagnostic["capture_error"], "BUILD_DIAGNOSTIC_NOT_DRAINED")
+                self.assertNotIn("android-offline-rebuild.private.log", [call.args[0] for call in opened.call_args_list])
+                self.life.owned = []
+
+    def test_nonblocking_nofollow_owned_type_size_and_link_guards_close_fds_before_read(self):
+        self.fixtures(b"private")
+        fake = 987654
+        real_open, real_stat, real_close = H.os.open, H.os.fstat, H.os.close
+        for change in (dict(st_mode=stat.S_IFIFO | 0o600), dict(st_size=64 * 1024**2 + 1), dict(st_nlink=2),
+                       dict(st_mode=stat.S_IFREG | 0o644), dict(st_uid=0)):
+            with self.subTest(change=change):
+                info = SimpleNamespace(st_mode=stat.S_IFREG | 0o600, st_size=7, st_nlink=1,
+                    st_uid=H.os.getuid(), st_gid=H.os.getgid())
+                vars(info).update(change)
+                def opened(name, flags, **kwargs):
+                    if name == "android-offline-rebuild.private.log":
+                        self.assertEqual(flags, H.os.O_RDONLY | H.os.O_CLOEXEC | H.os.O_NOFOLLOW | H.os.O_NONBLOCK)
+                        return fake
+                    return real_open(name, flags, **kwargs)
+                with patch.object(H.os, "open", side_effect=opened), \
+                     patch.object(H.os, "fstat", side_effect=lambda fd: info if fd == fake else real_stat(fd)), \
+                     patch.object(H.os, "close", side_effect=lambda fd: None if fd == fake else real_close(fd)) as close, \
+                     patch.object(H.os, "read", wraps=H.os.read) as read:
+                    diagnostic = H.offline_failure_diagnostic(self.root, self.source)
+                self.assertEqual(diagnostic["capture_error"], "BUILD_DIAGNOSTIC_FILE")
+                self.assertTrue(any(call.args == (fake,) for call in close.call_args_list))
+                self.assertFalse(any(call.args[0] == fake for call in read.call_args_list))
+        path = self.root / "android-offline-rebuild.private.log"
+        path.unlink(); path.symlink_to(self.root / "android-offline-rebuild.json")
+        self.assertEqual(H.offline_failure_diagnostic(self.root, self.source)["capture_error"], "BUILD_DIAGNOSTIC_IO")
+
+    def test_invalid_source_and_changed_or_short_files_emit_only_closed_capture_codes(self):
+        self.fixtures(b"private")
+        with patch.object(H.os, "open") as opened:
+            diagnostic = H.offline_failure_diagnostic(self.root, "PRIVATE_SOURCE")
+        opened.assert_not_called(); self.assertIsNone(diagnostic["source"])
+        self.assertEqual(diagnostic["capture_error"], "BUILD_DIAGNOSTIC_SOURCE")
+        with patch.object(H.os, "read", return_value=b""):
+            self.assertEqual(H.offline_failure_diagnostic(self.root, self.source)["capture_error"], "BUILD_DIAGNOSTIC_CHANGED")
+        real_stat = H.os.fstat
+        calls = [0]
+        def changed(fd):
+            calls[0] += 1; info = real_stat(fd)
+            if calls[0] != 3: return info
+            fields = {name: getattr(info, name) for name in ("st_dev", "st_ino", "st_rdev", "st_mode", "st_uid", "st_gid",
+                "st_nlink", "st_mtime_ns", "st_ctime_ns", "st_size")}
+            fields["st_ino"] += 1
+            return SimpleNamespace(**fields)
+        with patch.object(H.os, "fstat", side_effect=changed):
+            self.assertEqual(H.offline_failure_diagnostic(self.root, self.source)["capture_error"], "BUILD_DIAGNOSTIC_CHANGED")
+        duplicate = json.dumps(self.summary).replace('"exit": 1', '"exit": 0, "exit": 1').encode()
+        path = self.root / "android-offline-rebuild.json"
+        path.write_bytes(duplicate)
+        self.assertEqual(H.offline_failure_diagnostic(self.root, self.source)["capture_error"], "BUILD_DIAGNOSTIC_SUMMARY")
+
+    def test_diagnostic_capture_or_save_failure_never_replaces_original_command_error(self):
+        original = ValueError("ORIGINAL_COMMAND_FAILURE")
+        for failure in ("capture", "save", "bound"):
+            with self.subTest(failure=failure), patch.object(H, "run", side_effect=original), \
+                 patch.object(H, "offline_failure_diagnostic", return_value={}) as capture, patch.object(H, "save") as save:
+                if failure == "capture": capture.side_effect = OSError("PRIVATE_CAPTURE_ERROR")
+                elif failure == "save": save.side_effect = OSError("PRIVATE_SAVE_ERROR")
+                else: capture.return_value = dict(private="x" * 16384)
+                with self.assertRaises(ValueError) as caught:
+                    H.offline_build(self.root, dict(GITHUB_SHA=self.source))
+                self.assertIs(caught.exception, original)
+                if failure == "bound": save.assert_not_called()
+
+    def test_successful_offline_build_keeps_exact_command_and_skips_failure_capture(self):
+        output = self.root / "prepared/android/volparossa_dps_jni/build/outputs/apk/androidTest/debug"
+        output.mkdir(parents=True); (output / "inert.apk").write_bytes(b"inert nonexecutable fixture")
+        env = dict(GITHUB_SHA=self.source)
+        with patch.object(H, "run") as run, patch.object(H, "offline_failure_diagnostic") as capture:
+            H.offline_build(self.root, env)
+        capture.assert_not_called()
+        run.assert_called_once_with("android-offline-rebuild", H.gradle(self.root / "tools", "--offline", "--dependency-verification=strict",
+            ":volparossa_dps_jni:clean", ":volparossa_dps_jni:assembleDebug", ":volparossa_dps_jni:assembleDebugAndroidTest"),
+            self.root, env, self.root / "prepared/android", seconds=1200)
+        self.assertEqual(json.loads((self.root / "offline-apk.json").read_text())["source"], self.source)
+
+
 class KvmShimTests(unittest.TestCase):
     """No local KVM device, ioctl, credentials, namespace, signal or workload execution."""
     def setUp(self):

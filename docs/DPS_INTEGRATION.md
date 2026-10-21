@@ -240,10 +240,10 @@ python3 -B -m unittest discover -s integrations/dps-native -p 'test_*.py' -v
 git diff --check
 ```
 
-These pass for the current authored correction: source bindings plus 45 inert
+These pass for the current authored correction: source bindings plus 53 inert
 tests (seven Python/Git/archive preparation tests, six lifetime orchestration
 shims, 15 KVM/phase/input-file shims, eight baseline-diagnostic shims, and nine
-synthetic firewall JSON tests).
+synthetic firewall JSON tests, plus eight offline-failure diagnostic tests).
 The shims cover deferred signal delivery until child ownership is registered,
 unblocked child signals without a pre-exec hook, repeated INT/TERM deadlines,
 original-failure precedence, honest incomplete cleanup/state preservation,
@@ -470,7 +470,7 @@ before-snapshot, rejection of raw/unknown metadata, the whole-receipt byte bound
 and nested retention established receipt orchestration only. The actual diagnostic
 attempt below identified the changed component without establishing its raw cause.
 
-### Firewall configuration comparison candidate: hosted unrun
+### Firewall configuration comparison and preserved diagnostic attempt
 
 Published diagnostic source `33c801783e6cf2356d299189774b78135b6140a4` failed actual
 hosted run [39670953044](https://github.com/VOLPAROSSA/volparossa-map/actions/runs/39670953044)
@@ -525,14 +525,92 @@ Nested controls automatically use this same baseline/finalizer path. KVM phase
 checks still consume unchanged netns/credentials/KVM fields; typed diagnostic
 validation accepts the new firewall record, and the 16 KiB result bound remains.
 
-The 45 inert tests include counter-only acceptance, raw difference retention,
+The original 45 inert tests include counter-only acceptance, raw difference retention,
 named counters without handles, preserved identities/order/policy/quota/expiry,
 counter addition/removal/placement, unknown shapes, parser bounds and one-command
-acquisition semantics. The candidate has **not run on a hosted runner**. Its
-synthetic counter evidence does not explain historical failures or establish
-complete cancellation, emulator, Android/JNI or physical-positioning acceptance.
+acquisition semantics. Those synthetic checks did not explain historical failures
+or establish emulator, Android/JNI or physical-positioning acceptance. The scoped
+hosted observations below supply separate evidence for this comparison.
 
-### Catchable cancellation requirements: acceptance incomplete
+### Public build passed; offline rebuild failed; diagnostic candidate unrun
+
+Exact published Map source `4e165e6e6f382e45463f6977cb979f1284d4173e`, tree
+`199d50c4b489ad943fae9ef2053544510fa3a335`, failed actual hosted run
+[39672932771](https://github.com/VOLPAROSSA/volparossa-map/actions/runs/39672932771).
+Artifact `12379174273` is 81,501 bytes, SHA-256
+`6752878bfa9468c49ba42695c767787b775b8b75fb06ec2e65975b28d60253b9`;
+the 72,097-byte original log SHA-256 is
+`e1ebd303043cfa6079b66dde0ec22b21c1e6a0d62b625cf4e1afd9f86e4c9be5`.
+
+The KVM API probe opened the device, queried API `12`, and closed its FD. The
+earlier metadata-only admission receipt's `actual_open=false` describes that
+admission step, not the subsequent API probe. Neither step created a VM.
+Both actual cancellation controls passed their independent process-birth,
+namespace/state removal, signal and baseline checks. The public acquisition/build
+phase and its Android assembly command exited `0`, with zero capabilities and
+empty supplementary groups; source/tool/library/dependency-metadata receipts
+were retained. The offline Gradle command and enclosing namespace exited `1`.
+No offline APK binding was produced and the emulator phase was never reached.
+Outer cleanup drained groups, removed owned state, reported no cleanup errors,
+and confirmed other baselines plus firewall configuration unchanged. Its firewall
+classification is `COUNTERS_ONLY`: canonical counter statistics changed while
+all other parsed configuration fields/order matched. This observation belongs
+to this run and does not identify the cause of earlier raw-only mismatches.
+
+The public build saves the updated environment and reuses the same prepared
+project, Gradle/cache directories, generated verification metadata and Rust
+static library in the offline phase. The offline command adds `--offline`, strict
+dependency verification and module `clean`; it also runs in a private network
+namespace. That namespace leaves loopback down; only the emulator phase activates
+its own loopback. These source differences do not identify the failure. Gradle
+can use a single-use daemon even with `--no-daemon`, and its client communicates
+with that daemon over a local socket; see the
+[official Gradle daemon manual](https://docs.gradle.org/current/userguide/gradle_daemon.html).
+No loopback, cache or command-flag correction is justified by the retained evidence.
+
+The inner private Gradle log and enclosing private namespace traceback were
+excluded from retention and removed after drain. The retained exit/RSS summaries
+prove the Gradle command failed, but contain no error text. The phase's generic
+`ValueError` code supplies no further cause. The current three-file candidate
+therefore adds diagnostics only, leaving commands, network phases, credentials,
+KVM/firewall/cancellation mechanics, timeouts and first-error precedence unchanged.
+
+After the fixed offline command fails, its diagnostic first requires a matching
+fixed step receipt reporting nonzero exit, drained owned group and no cleanup
+error, with no remaining registered children. It uses a held private directory FD
+owned by the current nonroot UID/GID at mode `0700`. Both fixed input leaves are
+opened no-follow, nonblocking and close-on-exec, then checked as matching-owner,
+single-link, mode-`0600` regular files. The step summary is bounded to 4 KiB; logs
+over the existing 64 MiB step limit are not read. Descriptor metadata/size must
+remain stable across reads. Closing every acquired FD is attempted, including
+rejected inputs; a close failure receives a closed capture code.
+
+At most 64 KiB of log data is read: a 32 KiB prefix and, when needed, a tail with
+no overlap. The source-bound `offline-build-diagnostic.json` records actual file
+size, sampled byte count, window offsets/hash/size, and `COMPLETE` versus
+`PREFIX_TAIL` coverage. An entire-log fingerprint exists only for complete
+coverage. Disjoint windows are never concatenated for marker matching.
+Eleven finite marker flags can observe Gradle failure/daemon messages, local
+address/bind or unreachable-network text, offline-cache/verification/SDK/native
+build messages, or Java launch messages. They are text observations, never an
+authoritative diagnosis; absent markers do not rule out an unobserved cause.
+Besides the exact source revision, no log text, error text, URL, argument,
+environment field or filesystem path is retained.
+
+Capture runs under the existing cleanup budget without extending it. Closed
+capture codes report missing/unsupported/changed inputs or incomplete capture.
+The JSON receipt is bounded to 16 KiB and follows the existing JSON retention
+path before state removal. Capture or save failure cannot replace the original
+command exception; a missing diagnostic cannot establish successful capture.
+Eight inert tests exercise ordinary text inputs and mocked build failures,
+complete/window boundaries, privacy/retention, rejected FIFO/symlink/type/owner/
+link/size inputs, descriptor closing, unstable reads, original-error preservation,
+and unchanged successful command arguments. No local Gradle/native/SDK/VM trial
+occurred. This diagnostic candidate remains **unrun on a hosted runner**. Installed
+Android/JNI execution, all eight instrumentation tests and physical-positioning
+acceptance remain open.
+
+### Catchable cancellation requirements and scoped hosted proof
 
 Independent source review found that the first candidate lacked catchable TERM
 handling, so its `finally` blocks did not establish cancellation cleanup. The
@@ -566,8 +644,10 @@ to exercise that escalation. Acceptance requires both signals recorded, original
 interruption retained, every tracked process extinct, registered groups drained,
 private state removed, unchanged host baselines and a complete receipt. Wrapper
 exit status alone is insufficient. These controls execute only on the approved
-reviewed hosted runner. Their failed actual attempt is retained above; complete
-cancellation acceptance remains open. Source checks and local shims do not supply it.
+reviewed hosted runner. Failed attempts remain recorded above; run `39672932771`
+passed both controls for its synthetic process/namespace/state fixture. That
+scoped proof is separate from source checks and local shims, and does not prove
+cancellation of a running SDK acquisition, complete build tree or emulator.
 
 SIGKILL, blocked I/O, workflow killtree and runner destruction can prevent both
 cleanup and final receipts. Unconfirmed private state is preserved until the

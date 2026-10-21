@@ -632,12 +632,128 @@ def acquire_build(state, env):
     verify(state / "organicmaps", locked["organicmaps"])
 
 
+def offline_failure_diagnostic(state, source):
+    """Hash/marker observations only, after the fixed failed command drained."""
+    result = dict(schema=1, source=None, phase="offline-build", stage="android-offline-rebuild",
+                  capture_error=None, coverage=None, log_bytes=None, read_bytes=0,
+                  windows=[], complete_log_fingerprint=None, observed_markers=[])
+    descriptors = []
+    codes = {"BUILD_DIAGNOSTIC_SOURCE", "BUILD_DIAGNOSTIC_STATE", "BUILD_DIAGNOSTIC_FILE",
+             "BUILD_DIAGNOSTIC_CHANGED", "BUILD_DIAGNOSTIC_SUMMARY", "BUILD_DIAGNOSTIC_NOT_DRAINED"}
+
+    def closed_error(error):
+        if isinstance(error, CleanupDeadline): return "BUILD_DIAGNOSTIC_DEADLINE"
+        if isinstance(error, OSError): return "BUILD_DIAGNOSTIC_IO"
+        value = error.args[0] if error.args else None
+        return value if type(value) is str and value in codes else "BUILD_DIAGNOSTIC_FAILED"
+
+    try:
+        with ACTIVE.cleanup():
+            try:
+                require(type(source) is str and re.fullmatch("[0-9a-f]{40}", source), "BUILD_DIAGNOSTIC_SOURCE")
+                result["source"] = source
+                with ACTIVE.registration():
+                    directory = os.open(state, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW)
+                    descriptors.append(directory)
+                owner = os.fstat(directory)
+                require(stat.S_ISDIR(owner.st_mode) and stat.S_IMODE(owner.st_mode) == 0o700
+                        and owner.st_uid == os.getuid() == os.geteuid() != 0 and owner.st_gid == os.getgid(),
+                        "BUILD_DIAGNOSTIC_STATE")
+
+                def owned_file(name, minimum, maximum):
+                    # Only the two fixed leaves below reach this helper. A held
+                    # directory FD plus no-follow/nonblocking opens prevents a
+                    # replaced symlink/FIFO from redirecting or blocking reads.
+                    with ACTIVE.registration():
+                        fd = os.open(name, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+                        descriptors.append(fd)
+                    info = os.fstat(fd)
+                    require(stat.S_ISREG(info.st_mode) and stat.S_IMODE(info.st_mode) == 0o600
+                            and info.st_uid == owner.st_uid and info.st_gid == owner.st_gid
+                            and info.st_nlink == 1 and minimum <= info.st_size <= maximum, "BUILD_DIAGNOSTIC_FILE")
+                    return fd, info
+
+                def stable(fd, info):
+                    after = os.fstat(fd)
+                    require(device_identity(after) == device_identity(info) and after.st_size == info.st_size,
+                            "BUILD_DIAGNOSTIC_CHANGED")
+
+                summary_fd, summary_info = owned_file("android-offline-rebuild.json", 1, 4096)
+                raw = os.read(summary_fd, summary_info.st_size)
+                require(len(raw) == summary_info.st_size, "BUILD_DIAGNOSTIC_CHANGED")
+                stable(summary_fd, summary_info)
+                def summary_object(pairs):
+                    require(len(pairs) == len(dict(pairs)), "BUILD_DIAGNOSTIC_SUMMARY")
+                    return dict(pairs)
+                try:
+                    summary = json.loads(raw, object_pairs_hook=summary_object)
+                except (ValueError, UnicodeError, RecursionError):
+                    raise ValueError("BUILD_DIAGNOSTIC_SUMMARY") from None
+                require(type(summary) is dict and set(summary) == {"exit", "peak_observed_rss", "wall_bound_seconds",
+                        "owned_process_group_drained", "signal_count", "cleanup_error"}, "BUILD_DIAGNOSTIC_SUMMARY")
+                require(summary["owned_process_group_drained"] is True and summary["cleanup_error"] is None and not ACTIVE.owned
+                        and type(summary["exit"]) is int and summary["exit"] != 0, "BUILD_DIAGNOSTIC_NOT_DRAINED")
+                log_fd, log_info = owned_file("android-offline-rebuild.private.log", 0, 64 * 1024**2)
+                size, windows, samples = log_info.st_size, [], []
+                for offset, length in [(0, min(size, 32768))] + (
+                        [(max(32768, size - 32768), min(size - 32768, 32768))] if size > 32768 else []):
+                    os.lseek(log_fd, offset, os.SEEK_SET)
+                    sample = os.read(log_fd, length)
+                    require(len(sample) == length, "BUILD_DIAGNOSTIC_CHANGED")
+                    samples.append(sample); windows.append(dict(offset=offset, **digest(sample)))
+                stable(log_fd, log_info)
+                complete = size <= 65536
+                # Never join disjoint windows for marker matching: that could
+                # invent a phrase spanning the unobserved middle of a log.
+                searchable = [b"".join(samples)] if complete else samples
+                markers = {
+                    "GRADLE_FAILURE_HEADER": (b"FAILURE: Build failed with an exception",),
+                    "GRADLE_DAEMON_START": (b"Unable to start the daemon process",),
+                    "GRADLE_DAEMON_CONNECT": (b"Could not connect to the Gradle daemon",),
+                    "LOCAL_ADDRESS_SELECTION": (b"Could not determine a usable wildcard IP", b"Unable to determine a usable wildcard IP"),
+                    "LOCAL_SOCKET_BIND": (b"java.net.BindException", b"Cannot assign requested address"),
+                    "NETWORK_UNREACHABLE": (b"Network is unreachable",),
+                    "OFFLINE_CACHE_MESSAGE": (b"No cached version", b"available for offline mode"),
+                    "DEPENDENCY_VERIFICATION_MESSAGE": (b"Dependency verification failed",),
+                    "SDK_COMPONENT_MESSAGE": (b"SDK location not found", b"Failed to find Build Tools", b"NDK not configured"),
+                    "NATIVE_BUILD_MESSAGE": (b"CMake Error", b"ninja: build stopped"),
+                    "JAVA_START_MESSAGE": (b"Could not create the Java Virtual Machine", b"JAVA_HOME is set to an invalid directory"),
+                }
+                result.update(coverage="COMPLETE" if complete else "PREFIX_TAIL", log_bytes=size,
+                    read_bytes=sum(len(sample) for sample in samples), windows=windows,
+                    complete_log_fingerprint=digest(searchable[0]) if complete else None,
+                    observed_markers=[name for name, phrases in markers.items()
+                                      if any(phrase in sample for sample in searchable for phrase in phrases)])
+            except BaseException as error:
+                result["capture_error"] = closed_error(error)
+            finally:
+                for fd in reversed(descriptors):
+                    try:
+                        os.close(fd)
+                    except BaseException:
+                        if result["capture_error"] is None: result["capture_error"] = "BUILD_DIAGNOSTIC_CLOSE"
+    except BaseException as error:
+        if result["capture_error"] is None: result["capture_error"] = closed_error(error)
+    return result
+
+
 def offline_build(state, env):
     tools = state / "tools"
     android = state / "prepared/android"
-    run("android-offline-rebuild", gradle(tools, "--offline", "--dependency-verification=strict",
-        ":volparossa_dps_jni:clean", ":volparossa_dps_jni:assembleDebug", ":volparossa_dps_jni:assembleDebugAndroidTest"),
-        state, env, android, seconds=1200)
+    try:
+        run("android-offline-rebuild", gradle(tools, "--offline", "--dependency-verification=strict",
+            ":volparossa_dps_jni:clean", ":volparossa_dps_jni:assembleDebug", ":volparossa_dps_jni:assembleDebugAndroidTest"),
+            state, env, android, seconds=1200)
+    except BaseException:
+        try:
+            diagnostic = offline_failure_diagnostic(state, env["GITHUB_SHA"])
+            with ACTIVE.cleanup():
+                require(len((json.dumps(diagnostic, indent=2, sort_keys=True) + "\n").encode()) <= 16384,
+                        "BUILD_DIAGNOSTIC_RECEIPT_BOUND")
+                save(state / "offline-build-diagnostic.json", diagnostic)
+        except BaseException:
+            pass  # A diagnostic must never replace the original command failure.
+        raise
     apks = list((android / "volparossa_dps_jni/build/outputs/apk/androidTest/debug").glob("*.apk"))
     require(len(apks) == 1, "ONE_TEST_APK")
     save(state / "offline-apk.json", dict(source=env["GITHUB_SHA"], apk=digest(apks[0].read_bytes())))

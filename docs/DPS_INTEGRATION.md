@@ -256,6 +256,13 @@ The source gate and complete 89-test inert suite pass locally. Of the original
 77 test methods, 76 retain identical ASTs; the orchestration test necessarily
 adds the new control before acquisition. Its bootstrap fixture helper also
 supplies the new PID-namespace identity. No original assertions were removed.
+The test-permission correction adds four focused inert tests: **89 existing + 4
+= 93**. All 89 existing test-method ASTs remain identical to published
+`b64fba86d56ef1ac9e8d1afe89274c009bb7fffe`. The four additions exercise the exact
+negative manifest marker, rejection of grants/extra attributes/elements/other
+source sets, and method/status/message-scoped assertion classification with
+newline and negative controls. The 93-test whole inert suite remains required on
+the hosted source gate; these tests do not execute Android manifest merging.
 No Android tests ran locally. Focused reproduction is:
 
 ```sh
@@ -1042,3 +1049,56 @@ the core C ABI sanitizer results do not supply it. Main Map navigation, OS app
 identity, real permissions/sensors, private protected execution, coordinate
 conversion, GNSS integrity, fusion and positioning improvement all remain open.
 The complete DPS goal and all original Map/network requirements remain in force.
+
+
+### Targeted test dependency permission correction
+
+Actual `39690910102` on published Map
+`b64fba86d56ef1ac9e8d1afe89274c009bb7fffe` passed the hosted group-reaping
+control, inner emulator/ADB cleanup and outer cleanup. Its instrumentation
+receipt contains seven passed methods and one `ASSERTION` failure in
+`actualDebugActivityDisplayRevokeBackgroundAndPermissionBoundary`; the precise
+assertion was not retained. The method first requires that the installed target
+package declare no requested permissions. Its later Activity/UI/background
+assertions were not independently accepted. Separately, observed KVM mtime/ctime
+changes remain unresolved; IPv6 matched and firewall comparison was counters-only.
+No timestamp normalization or historical zombie attribution follows.
+
+Read-only ZIP/XML inspection of official Google Maven artifacts, with SHA-256
+verified against the run's dependency-verification XML before inspection, found
+that [ext-junit 1.3.0's POM](https://dl.google.com/dl/android/maven2/androidx/test/ext/junit/1.3.0/junit-1.3.0.pom)
+(`92af7f253e5eabe2caec5c56f308312653d123042b22754d6ff664e1752dcf3f`)
+depends on [androidx.test:core 1.7.0](https://dl.google.com/dl/android/maven2/androidx/test/core/1.7.0/core-1.7.0.aar).
+That AAR (`f4dacd8edceeec48e0c76ecf28339b28f4b4f6b74f8e34e9e59b472c27d9eb81`)
+declares `android.permission.REORDER_TASKS`. This is a source incompatibility with
+the fixture's strict zero-requested-permission contract, not proof of the failed
+historical assertion. The original retained artifact
+`12388379237.zip` is 97,748 bytes with SHA-256
+`179a955fc498b474a7f0f5c552caabe6630f34dd808cc226d2bc3f8ae4530c57`.
+No raw instrumentation stack or merged installed manifest is retained there.
+
+A new `module/src/androidTest/AndroidManifest.xml` contains only a
+`tools:node="remove"` directive for that named permission. It follows the official
+[manifest merger's node-removal semantics](https://developer.android.com/build/manage-manifests#node_markers):
+the higher-priority manifest removes a matching lower-priority element. The
+marker is scoped to the test source set and does not grant a permission. Source
+gating accepts only this exact permission/name/removal marker with no extra
+attributes or elements; other source sets still forbid permission declarations.
+The runtime null-or-zero `requestedPermissions` assertion and all eight Android
+test methods remain unchanged. No AndroidX helper activity is removed. Candidate
+`androidx.core:core` 1.13/1.17 AAR manifests also contain an application-specific
+signature permission; their presence in verification XML does not prove the
+resolved APK graph. That permission is not removed. Actual merged permissions
+and the complete eight-test runtime result remain necessary acceptance evidence.
+
+The existing bounded instrumentation-output decoder additionally classifies
+`PERMISSION_BOUNDARY` only when the fixed Activity test has terminal `FAILED`
+status and the first stack line exactly equals
+`java.lang.AssertionError: fixture declares no permissions`. Other methods,
+messages and assertion statuses retain generic `ASSERTION`. No raw message,
+stack, permission list or new capture is retained; the existing `failure_family`
+field carries the closed classification. The original eight-test acceptance
+predicate, parser bounds, receipt fields/retention, deadlines, cleanup, signals,
+KVM checks, baselines, workflow and JNI/Activity/controller sources are unchanged.
+The correction removes the known inherited permission at source. It does not
+establish the historical cause or prove final merged-APK or runtime success.

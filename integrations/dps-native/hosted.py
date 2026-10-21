@@ -996,6 +996,9 @@ def instrumentation_observation(output):
                 if code in {b"-1", b"-2", b"-4"}:
                     exception = bundle.get(b"stack", b"").partition(b":")[0]
                     rows[name]["failure_family"] = families.get(exception, "UNKNOWN")
+                    if (code == b"-2" and name == methods[-1] and bundle.get(b"stack")
+                            == b"java.lang.AssertionError: fixture declares no permissions"):
+                        rows[name]["failure_family"] = "PERMISSION_BOUNDARY"
                 elif b"stack" in bundle: result["unexpected_records"] = True
             bundle = {}
         elif line.startswith(b"INSTRUMENTATION_CODE: "):

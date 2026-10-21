@@ -9,6 +9,25 @@ import xml.etree.ElementTree as ET
 from prepare import HERE, pins, require
 
 
+def manifest_boundary(source, module):
+    root = ET.fromstring(source.read_text())
+    ns = "{http://schemas.android.com/apk/res/android}"
+    if source == module / "src/androidTest/AndroidManifest.xml":
+        require(root.tag == "manifest" and not root.attrib and len(root) == 1,
+                "TEST_PERMISSION_REMOVAL_ONLY")
+        marker = root[0]
+        require(marker.tag == "uses-permission" and marker.attrib == {
+            ns + "name": "android.permission.REORDER_TASKS",
+            "{http://schemas.android.com/tools}node": "remove"}
+            and not len(marker) and not (marker.text or "").strip()
+            and not (root.text or "").strip() and not (marker.tail or "").strip(),
+            "TEST_PERMISSION_REMOVAL_ONLY")
+    else:
+        require(not root.findall("uses-permission"), "NO_DECLARED_PERMISSION")
+        for activity in root.findall("application/activity"):
+            require(activity.get(ns + "exported") == "false", "NONEXPORTED_FIXTURE")
+
+
 def main():
     locked = pins()
     upstream = json.loads((HERE.parents[1] / "upstream.lock.json").read_text())
@@ -23,12 +42,9 @@ def main():
                 and pin["algorithm"] in ("sha1", "sha256")
                 and re.fullmatch("[0-9a-f]{" + str(40 if pin["algorithm"] == "sha1" else 64) + "}", pin["digest"]), "TOOL_PIN")
     module = HERE / "module"
-    ns = "{http://schemas.android.com/apk/res/android}"
+    require((module / "src/androidTest/AndroidManifest.xml").is_file(), "TEST_PERMISSION_REMOVAL_REQUIRED")
     for source in module.rglob("AndroidManifest.xml"):
-        root = ET.fromstring(source.read_text())
-        require(not root.findall("uses-permission"), "NO_DECLARED_PERMISSION")
-        for activity in root.findall("application/activity"):
-            require(activity.get(ns + "exported") == "false", "NONEXPORTED_FIXTURE")
+        manifest_boundary(source, module)
     require(not (module / "src/main/java/org/volparossa/map/dps/QualityActivity.java").exists(), "DEBUG_ONLY_ACTIVITY")
     cmake = (module / "src/main/cpp/CMakeLists.txt").read_text()
     require("add_library(volparossa_dps_jni SHARED quality_jni.c)" in cmake and "dps_rust" in cmake

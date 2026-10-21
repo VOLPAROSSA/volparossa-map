@@ -14,6 +14,7 @@ import zipfile
 import prepare as P
 import tool_inputs as T
 import hosted as H
+import source_gate as S
 
 
 class PreparationTests(unittest.TestCase):
@@ -68,6 +69,35 @@ class PreparationTests(unittest.TestCase):
         for row in json.loads((core / "crates/volparossa-dps-ffi/tests/fixtures/manifest.json").read_text())["vectors"]:
             asset = output / "android/volparossa_dps_jni/src/androidTest/assets" / row["file"]
             self.assertEqual(P.digest(asset.read_bytes()), {k: row[k] for k in ("bytes", "sha256")})
+
+    def test_test_manifest_allows_only_exact_negative_permission_marker(self):
+        module = P.HERE / "module"
+        source = module / "src/androidTest/AndroidManifest.xml"
+        S.manifest_boundary(source, module)
+        marker = source.read_text()
+        mutations = (marker.replace(' tools:node="remove"', ""),
+            marker.replace('node="remove"', 'node="merge"'),
+            marker.replace('node="remove"', 'node="removeAll"'),
+            marker.replace("REORDER_TASKS", "ACCESS_FINE_LOCATION"),
+            marker.replace('tools:node="remove"', 'tools:node="remove" android:maxSdkVersion="21"'),
+            marker.replace("</manifest>", "<application /></manifest>"),
+            marker.replace("</manifest>", '<uses-permission android:name="android.permission.INTERNET" /></manifest>'),
+            marker.replace(" />", "><application /></uses-permission>"),
+            marker.replace("<manifest ", '<manifest package="unexpected" '),
+            marker.replace("<uses-permission", "PRIVATE<uses-permission"),
+            marker.replace("</manifest>", "PRIVATE</manifest>"))
+        for raw in mutations:
+            with self.subTest(raw=raw), patch.object(Path, "read_text", return_value=raw):
+                with self.assertRaisesRegex(ValueError, "TEST_PERMISSION_REMOVAL_ONLY"):
+                    S.manifest_boundary(source, module)
+
+    def test_permission_removal_marker_is_not_allowed_in_main_or_debug_manifest(self):
+        module = P.HERE / "module"
+        raw = (module / "src/androidTest/AndroidManifest.xml").read_text()
+        for variant in ("main", "debug", "other"):
+            with patch.object(Path, "read_text", return_value=raw):
+                with self.assertRaisesRegex(ValueError, "NO_DECLARED_PERMISSION"):
+                    S.manifest_boundary(module / "src" / variant / "AndroidManifest.xml", module)
 
     def test_wrong_revision_dirty_source_modified_pin_existing_output_reject_before_write(self):
         core, upstream, pins = self.fixtures()
@@ -922,6 +952,37 @@ class InstrumentationObservationTests(unittest.TestCase):
             encoded = json.dumps(observed)
             for secret in ("SECRET", "/private", "private.", "Stack.file"): self.assertNotIn(secret, encoded)
             self.assertLessEqual(len(encoded.encode()), 16384)
+
+    def test_permission_assertion_is_exact_method_message_and_failed_status_only(self):
+        name = self.methods[-1]
+        message = "java.lang.AssertionError: fixture declares no permissions"
+        good = self.transcript()
+        output = good.replace(self.record(name, 8, 0),
+            self.record(name, 8, -2, message + "\n\tat PRIVATE_STACK /private/path"))
+        for raw in (output, output.replace(b"\n", b"\r\n")):
+            observed = H.instrumentation_observation(raw)
+            self.assertEqual(observed["tests"][name], dict(status="FAILED", failure_family="PERMISSION_BOUNDARY"))
+            self.assertTrue(observed["inventory_complete"]); self.assertFalse(observed["all_eight_passed"])
+            self.assertEqual(observed["counts"]["PASSED"], 7)
+            for private in (message, "PRIVATE", "/private", "STACK"): self.assertNotIn(private, json.dumps(observed))
+            self.assertLessEqual(len(json.dumps(observed).encode()), 16384)
+
+    def test_permission_assertion_near_messages_other_methods_and_statuses_stay_generic(self):
+        name = self.methods[-1]
+        message = "java.lang.AssertionError: fixture declares no permissions"
+        messages = (message.replace("fixture", "Fixture"), message + " extra", message + " ", message.replace("permissions", "permission"),
+            "java.lang.AssertionError: other\n" + message,
+            "junit.framework.AssertionFailedError: fixture declares no permissions")
+        for stack in messages:
+            output = self.transcript().replace(self.record(name, 8, 0), self.record(name, 8, -2, stack))
+            self.assertEqual(H.instrumentation_observation(output)["tests"][name]["failure_family"], "ASSERTION")
+        for other in self.methods[:-1]:
+            i = self.methods.index(other) + 1
+            output = self.transcript().replace(self.record(other, i, 0), self.record(other, i, -2, message))
+            self.assertEqual(H.instrumentation_observation(output)["tests"][other]["failure_family"], "ASSERTION")
+        for code in (-1, -4):
+            output = self.transcript().replace(self.record(name, 8, 0), self.record(name, 8, code, message))
+            self.assertEqual(H.instrumentation_observation(output)["tests"][name]["failure_family"], "ASSERTION")
 
     def test_unknown_duplicate_mismatched_or_partial_protocol_never_becomes_complete(self):
         good = self.transcript()

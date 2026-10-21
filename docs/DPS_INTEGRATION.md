@@ -1,8 +1,9 @@
 # DPS location integration boundary
 
 This document maps the shared VOLPAROSSA positioning service (DPS) to Organic
-Maps' pinned native location inputs. It records integration seams, not an
-implemented adapter or evidence of improved positioning. The core design is
+Maps' pinned native location inputs. A separate Android native-quality fixture
+is now authored below; its source checks are not Android execution evidence or
+evidence of improved positioning. The core design is
 [`DPS.md` at core PR #299 candidate `4e673a5a`](https://github.com/VOLPAROSSA/volparossa/blob/4e673a5a5a9b0c3ad08325999496b72461ba301a/docs/services/DPS.md).
 The corrected contract uses request field 64 and response field 64, retaining
 local-control envelope version 2 and DPS schema version 1. The initial prototype's
@@ -89,14 +90,15 @@ DPS result to `GpsTracker` or `TrackRecorder`, or retain it as movement history,
 unless the existing independent recording choice explicitly authorizes that
 recording. Revocation and expiry must clear the app's DPS-selected state.
 
-## Next app-owned Android slice
+## App-owned Android quality candidate
 
 Reuse the shared Rust `DpsAssessRequest::assess` implementation through a bounded,
 separately typed native bridge. Do not connect the app to the administrative
 socket or reimplement the assessor in Java/C++. Keep any necessary JNI/FFI unsafe
 boundary separate from the shared Rust code's existing unsafe-code prohibition.
-This is an implementation plan; neither the native bridge nor its consent
-coordinator exists in the pinned source.
+The new [`integrations/dps-native`](../integrations/dps-native/) candidate adds
+the bridge and consent controller as a separate module in a disposable source
+transformation. It does not patch the existing Organic Maps location pipeline.
 
 The existing `:sdk` module builds the `organicmaps` C++ shared library through
 [`android/sdk/src/main/cpp/CMakeLists.txt`](https://github.com/organicmaps/organicmaps/blob/b20d1417eef1e3c63a447ac8658db4307a066024/android/sdk/src/main/cpp/CMakeLists.txt)
@@ -158,3 +160,208 @@ not a claim that these environments are already solved.
 
 Lawful bounded hardware/estimator research may proceed alongside native
 integration; the stages distinguish evidence, not a mandatory build order.
+
+## Isolated Android JNI fixture: source status and reproduction
+
+Map base `e8fdcca87575e238894d579797379de9c3516384` now has an authored,
+optional `:volparossa_dps_jni` Android library fixture. The production main
+manifest requests no permissions and declares no Activity. A nonexported debug
+Activity starts disabled, requires an explicit consent button, and assesses
+only a fixed public synthetic Cartesian fixture after a separate button click.
+It displays claim consistency, conflicts and all seven limitations. No coordinate,
+identity, precise observation time, calibrated accuracy or position is returned.
+
+The immutable native dependency is core
+[`4d4612200e0a4a46546e0c827a3f3e7f0b73c669`](https://github.com/VOLPAROSSA/volparossa/tree/4d4612200e0a4a46546e0c827a3f3e7f0b73c669),
+tree `bac45917af63e152ddb232a885446cb7221c84bb`.
+Its source gate [39661011331](https://github.com/VOLPAROSSA/volparossa/actions/runs/39661011331)
+was independently audited for 12 Rust tests, 18 C and 18 C++ sanitized cases,
+and 36 Memcheck cases. All 14 non-workflow ABI files match corrected predecessor
+`aae217d3341d50ea3f925ac58059a705ba215f75`; all 797 main blobs are preserved.
+That evidence concerns the core library and its C/C++ callers, not this JNI glue
+or Android. Original artifact `12374096078` has SHA-256
+`01ceb0c715afadd164ab3f56b02da56066b5e53c9ec6ed9f12a3d3340ebcba57`.
+Earlier core source `b97a5d1a467270f40ad368b3055cca6de0d6a341` passed
+its bounded native gate, but its combined Quality run failed cargo-deny for a
+missing path-dependency version. The corrected successor `aae217d3` and current
+composition preserve runtime/header/goldens. Current combined Quality
+`39661019902` and CodeQL `39661012097` were still pending when this candidate was
+authored; they are not represented as accepted.
+`pins.json` binds that core header and all four canonical bare-request goldens,
+plus the existing Organic Maps commit and six build/configuration inputs.
+`prepare.py` requires clean, exact, full-history source checkouts and a new
+output directory. It clones Organic Maps with Git metadata for `version.sh`,
+appends one settings include, and copies the new module, header and public
+fixtures. Existing modules, source/data licenses, notices, upstream branding,
+location callbacks and map files are preserved. No upstream source is vendored.
+For source-only preparation, with those exact clean checkouts already available:
+
+```sh
+python3 -B integrations/dps-native/prepare.py --upstream /absolute/pinned-organicmaps --core /absolute/pinned-core --output /absolute/new-disposable-output
+```
+
+The thin JNI C target links the Rust static library and its Android system runtime
+libraries only, without `:sdk`, `organicmaps`, `jni_helper` or `JNI_OnLoad`.
+It checks nulls, Java array lengths, time and the 16 KiB input limit before a
+bounded stack copy, erases its copy, and returns a fixed closed error status.
+Java validates exactly nine fields, schema/ABI versions, status, frame, bounded
+claim/pair counts and exactly `0x7f` limitations. Raw errors and requests are not
+logged. JNI exceptions are cleared into the closed internal error code; VM
+allocation/abort/process faults remain outside a recoverable-result guarantee.
+
+`QualityController` owns one worker for its entire lifetime, with capacity for
+one pending, running or unpublished request. Consent generations have a bounded
+30-second maximum TTL using Android elapsed realtime. Authority is checked before
+native work and again before UI publication. Revoke, disable, background and
+expiry clear displayed state, erase queued requests and remove pending callbacks;
+a late completion cannot publish under a newer generation. In-flight synchronous
+native work is allowed to finish, with its stale result discarded. Closing is
+nonblocking on the UI thread. A bounded observer method waits and joins the actual
+worker only from another thread. Resume does not silently enable DPS. This
+controls this component's ownership, not copies a caller retained or other apps.
+
+The authored eight instrumentation tests use the actual Rust/JNI library for the
+four goldens and closed failures, validate contradictory summaries, exercise
+in-flight revocation, generation changes, expiry and late publication, display
+quality through actual debug buttons, move the Activity's task to the background
+and resume it, assert no declared permissions, and join owned workers. Background
+coverage now uses a freshly displayed result without prior revoke/expiry, plus
+fresh-TTL in-flight work that completes after background/resume. A package-private,
+null-in-production observer confirms actual publication posting while a test holds
+the UI; the injected clock expires only after posting and before UI delivery.
+This separates worker-completion expiry from publication-window expiry. Every
+controller is closed and its real worker joined from the instrumentation thread.
+Injected clock/delay tests are synthetic lifecycle evidence, not hardware sensing.
+All eight tests have **not been run**. Inert local verification is:
+
+```sh
+python3 -B integrations/dps-native/source_gate.py
+python3 -B -m unittest discover -s integrations/dps-native -p 'test_*.py' -v
+git diff --check
+```
+
+These pass for the authored source: source bindings plus 13 inert tests (seven
+Python/Git/archive preparation tests and six lifetime orchestration shims).
+The shims cover deferred signal delivery until child ownership is registered,
+unblocked child signals without a pre-exec hook, repeated INT/TERM deadlines,
+original-failure precedence, honest incomplete cleanup/state preservation,
+state removal after simulated drain, and rejection of local cancellation trials.
+They launch no cancellation child, deliver no OS signal, create no namespace and
+make no privileged call; passing them is not cancellation runtime acceptance. The test fixtures for preparation mechanics are inert text;
+they are never passed to JNI and never represented as real Protobuf goldens.
+No Rust, native, Java, Gradle, SDK, Node, emulator or hardware execution occurred
+on the development host. No workflow was dispatched for this candidate.
+
+## Hosted candidate and evidence boundaries
+
+`.github/workflows/dps-native.yml` runs only inert source checks automatically.
+Its native job is manual and defaults off; the principal must review the source
+and independent review before selecting `execute_reviewed_fixture`. `hosted.py`
+rejects local/nonreviewed execution and requires GitHub-hosted Ubuntu 24.04,
+this repository/workflow, exact clean Map source and a unique run directory.
+It does not enable a paid service, publish an APK or create a release.
+
+The candidate explicitly acquires official pinned Gradle 9.6.0, SDK 36 revision 2,
+build tools 36.0.0, Organic Maps' NDK 29.0.14206865, CMake 3.22.1,
+platform tools 37.0.1, emulator 37.2.12 and the API36 x86_64 default system image
+revision 2. Published Google archive sizes/SHA-1 were checked against official
+[repository metadata](https://dl.google.com/android/repository/repository2-3.xml)
+and [system-image metadata](https://dl.google.com/android/repository/sys-img/android/sys-img2-3.xml).
+The [official historical NDK list](https://github.com/android/ndk/wiki/Unsupported-Downloads)
+confirms the r29 Linux pin. Gradle has an
+[official SHA-256](https://services.gradle.org/distributions/gradle-9.6.0-bin.zip.sha256).
+No independent official SHA-256 was located for these Google archives: their
+published SHA-1 plus exact HTTPS URL and size is the acquisition trust boundary;
+newly observed SHA-256 receipts are provenance, not independent authorization.
+Archive paths, links, member counts and expanded sizes are bounded; notices remain.
+
+The runner's preinstalled Java 17 and rustup launcher are runner-image trust
+inputs, not newly hash-pinned distributions. The candidate records version output,
+uses private Rust/Cargo homes, installs the exact official Rust 1.85.0 target with
+rustup's normal checksum verification, requires its exact compiler version, and
+compiles the pinned Rust source for Android x86_64/API21. No prebuilt DPS binary
+is accepted. The selected Android API36 emulator proves neither API21 compatibility
+nor other ABIs/iOS. Upstream AGP 9.2.1 is retained; its
+[official compatibility table](https://developer.android.com/build/releases/agp-9-2-0-release-notes)
+requires build tools 36.0.0 and Java 17. The root project's other plugins configure,
+but this fixture does not build the Organic Maps C++ library or depend on its SDK.
+
+Public Gradle/Maven dependency acquisition is explicit. Generated checksum
+verification metadata records acquired dependency consistency, not prior human
+review or release authorization. A second clean APK rebuild requires offline,
+strict dependency verification inside a new network/PID/mount namespace. The same
+namespace runs the installed synthetic test APK on the pinned emulator, with only
+namespace loopback active and guest Wi-Fi/data disabled. Source-level absence of
+sensor/location/network APIs and the test's permission assertion are distinct from
+physical sensor traces, process identity attestation or measured absence of every
+socket attempt. There is no admin socket, daemon or host location access.
+
+Privilege is limited to read-only host firewall baselines, creating disposable
+namespaces, activating their loopback, and terminating the exact owned supervisor
+process group if necessary. Namespace bootstrap drops root UID/GID/groups before
+build/emulator work. No host DNS, routes, nftables rules, VPN or sysctls are changed.
+Before/after route/resolver/firewall hashes must match. Command output, elapsed
+wall time and sampled descendant RSS are bounded; the RSS monitor is not a hard
+kernel cgroup memory limit. Commands register and drain their process groups. Runtime PID namespace
+termination supplies the final descendant boundary; source checks alone do not
+establish actual drain. Failed cleanup or changed baselines fail the job.
+
+Only source/tool/APK hashes, public step receipts, dependency checksums, installed
+synthetic test results and cleanup receipts are artifact candidates. Raw logs,
+SDKs, Rust/Gradle caches, ADB keys and AVD data are excluded. After confirmed registered-group drain, removal of this run's generated private
+source/tool state and retention of fixed public receipts are required for success.
+Unconfirmed cleanup preserves remaining state for disposable-runner teardown. No cache reuses test outcomes. Hard workflow termination
+may prevent final receipts; the disposable runner teardown is then the external
+cleanup boundary and no completed cleanup claim is accepted.
+
+### Catchable cancellation candidate: unrun
+
+Independent source review found that the first candidate lacked catchable TERM
+handling, so its `finally` blocks did not establish cancellation cleanup. The
+current workflow uses `exec python3` for the actual step entry. The process
+lifetime installs INT/TERM handlers before owned work and registers each returned
+`Popen` child before a deferred cancellation can raise. Signal delivery remains
+unblocked during spawn; no `pthread_sigmask` blocking or unsafe `preexec_fn` is
+used. Entry rejects an already blocked INT/TERM mask. Ordinary exec resets caught
+handlers to defaults; the hosted control separately verifies an ordinary child's
+mask/default TERM handler and actual termination by TERM.
+
+[GitHub's cancellation reference](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-cancellation)
+describes INT to the step entry, 7,500 ms grace, then TERM and 2,500 ms before
+process-tree termination. Catchable cleanup uses at most nine seconds after INT
+and two seconds after TERM, with later TERM able to shorten the deadline. Repeated
+signals are recorded and never extend it or interrupt cleanup. Natural failure
+cleanup has a 15-second deadline. Original workload/cancellation failure retains
+precedence over cleanup errors; incomplete drain/state removal is reported as
+incomplete and cannot produce a successful receipt. Group TERM/KILL/reaping,
+public receipts and private-state deletion are attempted within those budgets.
+Removing a complete SDK/source tree may exceed them: this is a failure boundary,
+not a guarantee of graceful runner cancellation.
+
+Before any SDK acquisition, the guarded hosted fixture must pass an actual
+cancellation control. A child controller creates a new owned PID/net/mount
+namespace containing another owned child in a separate session, plus synthetic
+private state. The independent parent records process birth identities and the
+new namespace, injects TERM-first plus repeated INT, and separately the documented
+INT then 7.5-second-delayed TERM sequence. The control holds its cleanup gate only
+to exercise that escalation. Acceptance requires both signals recorded, original
+interruption retained, every tracked process extinct, registered groups drained,
+private state removed, unchanged host baselines and a complete receipt. Wrapper
+exit status alone is insufficient. These controls execute only on the approved
+reviewed hosted runner; they have **not been run**. No cancellation acceptance is
+claimed by their source or the local shims.
+
+SIGKILL, blocked I/O, workflow killtree and runner destruction can prevent both
+cleanup and final receipts. Unconfirmed private state is preserved until the
+disposable runner's external teardown; absent/incomplete receipts never prove
+cleanup. This control covers process/namespace/state ownership and does not
+establish JNI, Android, sensor, privacy-packet or physical-positioning acceptance.
+
+Before accepting Android evidence, review actual acquisition/archive layouts,
+upstream root-project configuration, manual AVD compatibility, native runtime
+linkage, installed manifest/test results, resource use and complete cleanup from
+an exact-source hosted run. JNI-specific Android sanitizer coverage is still open;
+the core C ABI sanitizer results do not supply it. Main Map navigation, OS app
+identity, real permissions/sensors, private protected execution, coordinate
+conversion, GNSS integrity, fusion and positioning improvement all remain open.
+The complete DPS goal and all original Map/network requirements remain in force.

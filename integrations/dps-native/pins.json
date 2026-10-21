@@ -1,0 +1,145 @@
+{
+  "schema": 1,
+  "organicmaps": {
+    "repository": "https://github.com/organicmaps/organicmaps.git",
+    "revision": "b20d1417eef1e3c63a447ac8658db4307a066024",
+    "files": {
+      "android/settings.gradle": {
+        "bytes": 913,
+        "sha256": "4b7b9e571d3ba0d6dedfc46b725dad061662c28ce975c936579f4e47263d4e90"
+      },
+      "android/build.gradle": {
+        "bytes": 4023,
+        "sha256": "d4b07098cd82ac6b1183d7a82580b4d1542d2631cab2a5810eca276bbd92442c"
+      },
+      "android/gradle/libs.versions.toml": {
+        "bytes": 5727,
+        "sha256": "246c595522058f8a61448df648a9c326fa1b1f57b24303b26bc669df66e1bad2"
+      },
+      "android/gradle.properties": {
+        "bytes": 716,
+        "sha256": "3d4fa507aceb63e46594218e6e329ee45c2202e0582ae7a22dd325152e4b247d"
+      },
+      "android/gradle/wrapper/gradle-wrapper.properties": {
+        "bytes": 281,
+        "sha256": "e74d4f107d2feab989b9a041a02e2d2b85567ff48415c9c7add5ecc19abd19f9"
+      },
+      "tools/unix/version.sh": {
+        "bytes": 2698,
+        "sha256": "ea7610f2f6c279409b163a02e8511ed2d9fd01304443c8dd4888ecdf89b09f7f"
+      }
+    }
+  },
+  "core": {
+    "repository": "https://github.com/VOLPAROSSA/volparossa.git",
+    "revision": "4d4612200e0a4a46546e0c827a3f3e7f0b73c669",
+    "files": {
+      "crates/volparossa-dps-ffi/include/volparossa_dps.h": {
+        "bytes": 3131,
+        "sha256": "3913a88c6be3e6d0ff658677941b546a9fba70c98cc74f1dbc678d7f7c3b6b37"
+      },
+      "crates/volparossa-dps-ffi/tests/fixtures/relative_consistent.pb": {
+        "bytes": 267,
+        "sha256": "31a678b65f2a24e7016cf6cf1d9438f721632bcf3f2c0c8ae77b4c3c7ca07fa7"
+      },
+      "crates/volparossa-dps-ffi/tests/fixtures/stale.pb": {
+        "bytes": 147,
+        "sha256": "2a3138c6a851dd2538cdcd3a4e4173253a1dcbb43e9f23bbfe11ab742eb1cd17"
+      },
+      "crates/volparossa-dps-ffi/tests/fixtures/manifest.json": {
+        "bytes": 2128,
+        "sha256": "5d36866c7370c54f298f56183ce071dbd27a07f0a3510b3834cbbde1b3f3f8f1"
+      },
+      "crates/volparossa-dps-ffi/tests/fixtures/empty.pb": {
+        "bytes": 27,
+        "sha256": "26d85fcdd131798b0e130b3c0b66ec1e8fa58913c102bd5b2994e9b1e7d7dbe1"
+      },
+      "crates/volparossa-dps-ffi/tests/fixtures/relative_conflict.pb": {
+        "bytes": 267,
+        "sha256": "375ca58ebd4049babb3d5f535639088d7872270deafebe5f8c77afdb280494a9"
+      }
+    }
+  },
+  "rust": "1.85.0",
+  "rust_target": "x86_64-linux-android",
+  "jdk_major": 17,
+  "agp": "9.2.1",
+  "ndk": "29.0.14206865",
+  "compile_sdk": 36,
+  "build_tools": "36.0.0",
+  "archives": {
+    "platform": {
+      "url": "https://dl.google.com/android/repository/platform-36_r02.zip",
+      "bytes": 65878410,
+      "algorithm": "sha1",
+      "digest": "2c1a80dd4d9f7d0e6dd336ec603d9b5c55a6f576",
+      "destination": "sdk/platforms/android-36",
+      "strip_prefix": "android-36",
+      "checksum_source": "https://dl.google.com/android/repository/repository2-3.xml"
+    },
+    "build-tools": {
+      "url": "https://dl.google.com/android/repository/build-tools_r36_linux.zip",
+      "bytes": 63737259,
+      "algorithm": "sha1",
+      "digest": "b0b6376977657e8ad9b969bacf4093601da2c6fb",
+      "destination": "sdk/build-tools/36.0.0",
+      "strip_prefix": "android-16",
+      "checksum_source": "https://dl.google.com/android/repository/repository2-3.xml"
+    },
+    "ndk": {
+      "url": "https://dl.google.com/android/repository/android-ndk-r29-linux.zip",
+      "bytes": 783549481,
+      "algorithm": "sha1",
+      "digest": "87e2bb7e9be5d6a1c6cdf5ec40dd4e0c6d07c30b",
+      "destination": "sdk/ndk/29.0.14206865",
+      "strip_prefix": "android-ndk-r29",
+      "checksum_source": "https://dl.google.com/android/repository/repository2-3.xml"
+    },
+    "cmake": {
+      "url": "https://dl.google.com/android/repository/cmake-3.22.1-linux.zip",
+      "bytes": 22308647,
+      "algorithm": "sha1",
+      "digest": "fd0a48b4a758310df8c7aa51f59840ed48fe7ed8",
+      "destination": "sdk/cmake/3.22.1",
+      "strip_prefix": "",
+      "checksum_source": "https://dl.google.com/android/repository/repository2-3.xml"
+    },
+    "platform-tools": {
+      "url": "https://dl.google.com/android/repository/platform-tools_r37.0.1-linux.zip",
+      "bytes": 9054187,
+      "algorithm": "sha1",
+      "digest": "477254aa5f903c15cf51001717bdf347fb6b53e0",
+      "destination": "sdk/platform-tools",
+      "strip_prefix": "platform-tools",
+      "checksum_source": "https://dl.google.com/android/repository/repository2-3.xml"
+    },
+    "emulator": {
+      "url": "https://dl.google.com/android/repository/emulator-linux_x64-16428233.zip",
+      "bytes": 349654171,
+      "algorithm": "sha1",
+      "digest": "cd7362ea55dfb86a418958138dc396e74165dd01",
+      "destination": "sdk/emulator",
+      "strip_prefix": "emulator",
+      "checksum_source": "https://dl.google.com/android/repository/repository2-3.xml"
+    },
+    "system-image": {
+      "url": "https://dl.google.com/android/repository/sys-img/android/x86_64-36_r02.zip",
+      "bytes": 844217077,
+      "algorithm": "sha1",
+      "digest": "829c076e8ff448a336097ae25a355b495ba36e2c",
+      "destination": "sdk/system-images/android-36/default/x86_64",
+      "strip_prefix": "x86_64",
+      "checksum_source": "https://dl.google.com/android/repository/sys-img/android/sys-img2-3.xml"
+    },
+    "gradle": {
+      "url": "https://services.gradle.org/distributions/gradle-9.6.0-bin.zip",
+      "bytes": 140681093,
+      "algorithm": "sha256",
+      "digest": "bbaeb2fef8710818cf0e261201dab964c572f92b942812df0c3620d62a529a01",
+      "destination": "gradle",
+      "strip_prefix": "gradle-9.6.0",
+      "checksum_source": "https://services.gradle.org/distributions/gradle-9.6.0-bin.zip.sha256"
+    }
+  },
+  "archive_trust": "Official Google historical SHA1 plus exact HTTPS URL and size; observed SHA256 is provenance only. Gradle has official SHA256. No independent SHA256 located for Google pins."
+}

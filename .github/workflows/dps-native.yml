@@ -1,0 +1,55 @@
+name: Map native DPS quality
+
+on:
+  pull_request:
+    paths: ['integrations/dps-native/**', '.github/workflows/dps-native.yml', 'docs/DPS_INTEGRATION.md', 'upstream.lock.json']
+  push:
+    branches: [main]
+    paths: ['integrations/dps-native/**', '.github/workflows/dps-native.yml', 'docs/DPS_INTEGRATION.md', 'upstream.lock.json']
+  workflow_dispatch:
+    inputs:
+      execute_reviewed_fixture:
+        description: 'Principal reviewed source, pins, dependencies and disposable hosted fixture'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: python3 -B integrations/dps-native/source_gate.py
+      - run: python3 -B -m unittest discover -s integrations/dps-native -p 'test_*.py' -v
+      - run: git diff --check
+  synthetic-jni:
+    if: github.event_name == 'workflow_dispatch' && inputs.execute_reviewed_fixture
+    needs: source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Reviewed disposable public JNI fixture
+        env:
+          VOLPAROSSA_DPS_REVIEWED: 'true'
+        run: exec python3 -B integrations/dps-native/hosted.py --reviewed-hosted-fixture
+      - name: Retain public receipts only
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: map-native-dps-${{ github.sha }}-${{ github.run_attempt }}
+          path: build/dps-native-evidence/
+          retention-days: 7
+          if-no-files-found: warn

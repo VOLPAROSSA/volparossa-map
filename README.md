@@ -2,11 +2,18 @@
 
 # Project VOLPAROSSA Map
 
-**Organic Maps connected to the VOLPAROSSA cooperative network.**
+**Keep the offline map. Add useful road conditions, without publishing your trip.**
 
-Offline navigation remains the foundation. The integration adds shared map delivery,
-short-lived traffic information and private synchronization without turning your journeys
-into a public location history.
+A downloaded map helps you find the way; fresh traffic information can help you
+decide when to leave or which road to take. VOLPAROSSA Map builds on Organic Maps,
+keeping offline search and navigation while working toward shared map downloads,
+short-lived road-condition reports and private synchronization.
+
+The [VOLPAROSSA core](https://github.com/VOLPAROSSA/volparossa) supplies shared
+content delivery so this app can focus on maps and journeys. Help connect
+[validated traffic snapshots](docs/TRAFFIC_ADAPTER.md) to the actual map display,
+with stale or missing reports visibly unknown and observation sharing explicitly
+chosen by the user.
 
 > Integration in development. This repository is not yet a modified Android/iOS application
 > with working decentralized traffic. Component checks are not mobile or live-network proof.

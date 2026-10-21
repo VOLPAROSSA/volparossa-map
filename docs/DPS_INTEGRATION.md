@@ -240,9 +240,9 @@ python3 -B -m unittest discover -s integrations/dps-native -p 'test_*.py' -v
 git diff --check
 ```
 
-These pass for the current authored correction: source bindings plus 53 inert
+These pass for the current authored correction: source bindings plus 56 inert
 tests (seven Python/Git/archive preparation tests, six lifetime orchestration
-shims, 15 KVM/phase/input-file shims, eight baseline-diagnostic shims, and nine
+shims, 18 KVM/phase/input-file shims, eight baseline-diagnostic shims, and nine
 synthetic firewall JSON tests, plus eight offline-failure diagnostic tests).
 The shims cover deferred signal delivery until child ownership is registered,
 unblocked child signals without a pre-exec hook, repeated INT/TERM deadlines,
@@ -253,7 +253,7 @@ make no privileged call; passing them is not cancellation runtime acceptance. Th
 they are never passed to JNI and never represented as real Protobuf goldens.
 No Rust, native, Java, Gradle, SDK, Node, emulator or hardware execution occurred
 on the development host. The published candidate's failed hosted attempt is
-preserved below; the current three-file diagnostic correction has not been dispatched.
+preserved below; the current three-file loopback correction has not been dispatched.
 
 ## Hosted candidate and evidence boundaries
 
@@ -369,7 +369,7 @@ Four fixed phases run through registered namespace supervisors:
 | --- | --- | --- | --- |
 | `kvm-probe` | New network/PID/mount namespaces; no external link | Sole validated KVM GID | 10 seconds |
 | `public-build` | Original public network; new PID/mount namespaces | Empty | 2,700 seconds |
-| `offline-build` | New network/PID/mount namespaces | Empty | 1,220 seconds |
+| `offline-build` | New network/PID/mount namespaces; loopback only | Empty | 1,220 seconds |
 | `emulator` | Separate new network/PID/mount namespaces; loopback only | Sole validated KVM GID | 420 seconds |
 
 The public-build phase moves the **existing** archive/source/dependency
@@ -532,7 +532,7 @@ acquisition semantics. Those synthetic checks did not explain historical failure
 or establish emulator, Android/JNI or physical-positioning acceptance. The scoped
 hosted observations below supply separate evidence for this comparison.
 
-### Public build passed; offline rebuild failed; diagnostic candidate unrun
+### Public build passed; preserved offline rebuild failure
 
 Exact published Map source `4e165e6e6f382e45463f6977cb979f1284d4173e`, tree
 `199d50c4b489ad943fae9ef2053544510fa3a335`, failed actual hosted run
@@ -561,8 +561,8 @@ The public build saves the updated environment and reuses the same prepared
 project, Gradle/cache directories, generated verification metadata and Rust
 static library in the offline phase. The offline command adds `--offline`, strict
 dependency verification and module `clean`; it also runs in a private network
-namespace. That namespace leaves loopback down; only the emulator phase activates
-its own loopback. These source differences do not identify the failure. Gradle
+namespace. At that source, the namespace left loopback down; only the emulator
+phase activated its own loopback. Those differences did not identify the failure. Gradle
 can use a single-use daemon even with `--no-daemon`, and its client communicates
 with that daemon over a local socket; see the
 [official Gradle daemon manual](https://docs.gradle.org/current/userguide/gradle_daemon.html).
@@ -606,9 +606,56 @@ Eight inert tests exercise ordinary text inputs and mocked build failures,
 complete/window boundaries, privacy/retention, rejected FIFO/symlink/type/owner/
 link/size inputs, descriptor closing, unstable reads, original-error preservation,
 and unchanged successful command arguments. No local Gradle/native/SDK/VM trial
-occurred. This diagnostic candidate remains **unrun on a hosted runner**. Installed
-Android/JNI execution, all eight instrumentation tests and physical-positioning
-acceptance remain open.
+occurred. The subsequent actual diagnostic observations are retained below.
+Installed Android/JNI execution, all eight instrumentation tests and
+physical-positioning acceptance remain open.
+
+### Captured offline local-address marker; loopback correction unrun
+
+Published source `1d4b777c3cd06822d89d6f54a36a2646876a995d`, tree
+`f2eaff7614f26f789830d058eb98def9a0d64a46`, passed source run `39675913577`
+with 53 inert tests and Components run `39675913654` with 31 tests, against
+test-merge `9f7be559` with that same tree. Actual hosted run
+[39676098216](https://github.com/VOLPAROSSA/volparossa-map/actions/runs/39676098216)
+failed after public-build exit `0` and offline-build exit `1`, before Android
+execution. Original artifact `12381767253.zip` is 82,072 bytes, SHA-256
+`dbaa5fb18aba812ad18c84478bc79d5a75de1a73db53909afca4f3c1a519210c`;
+the 74,598-byte original log SHA-256 is
+`3a5c1e14902ac0ed28972699e4d6704a68fa1e2757bd967f4b1535354d2e8187`.
+
+The diagnostic captured the complete 537-byte offline log, with no capture error,
+SHA-256 `227ae24043ca27c9dada9dd80c2d60d994f620b1923105d43d05158073c18e29`.
+Its only observed flags were `GRADLE_FAILURE_HEADER` and `LOCAL_ADDRESS_SELECTION`.
+The source verified a private network namespace containing only `lo`, then left
+that interface down for offline-build. The current correction includes
+offline-build in the existing loopback activation predicate, alongside emulator,
+after both namespace/link guards and before credential drop. The existing fixed
+`ip link set lo up` command and five-second timeout are unchanged. Public-build
+and KVM probe do not activate loopback. This touches only the disposable fixture's
+private loopback; it adds no external interface, host configuration change,
+permission, cache change, fallback, retry or build-command change. It targets the
+observed local-address-selection failure; actual offline resolution still needs
+a new hosted trial.
+
+The same failed run passed both cancellation controls, with six tracked process
+identities extinct in each. Outer registered groups drained and owned state was
+removed, but host-baseline acceptance **failed**: cleanup errors contain
+`HOST_BASELINE_UNCONFIRMED`, and the unchanged-host field is false. Changed
+components are `ipv6_routes` and `firewall`. Firewall configuration matched with
+`COUNTERS_ONLY` statistics changes. The raw IPv6 snapshot remained 900 bytes but
+changed from SHA-256
+`f2ffd75c47ca531b2748edf8b83d154d04a2eb70ca9d60d34aab332e425d2d55`
+to `25e2aa2d38a16c10b89a95eb8919948e7c5dc4f2601a1b47ff1b499e5e6fcbae`.
+No original IPv6 contents were retained, so that cause is unknown. No transient
+counter explanation or successful unchanged-host acceptance is established.
+This correction leaves IPv6 and every other baseline comparison unchanged.
+
+Three added mocked phase tests verify offline-build/emulator activate only
+loopback exactly once before drop, public-build/KVM do not, and wrong namespaces
+or unexpected/missing private interfaces reject before activation or drop. No
+local network, SDK, Gradle, native, Rust or VM execution occurred. The correction
+is **unrun on a hosted runner** and does not establish VM, installed Android/JNI,
+instrumentation or physical-positioning acceptance.
 
 ### Catchable cancellation requirements and scoped hosted proof
 

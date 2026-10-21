@@ -911,7 +911,7 @@ def phase_child(state, phase):
         require(same_network == (phase == "public-build"), "PHASE_NETWORK_NAMESPACE")
         if not same_network:
             require(sorted(n for _, n in socket.if_nameindex()) == ["lo"], "PHASE_PRIVATE_LINKS")
-            if phase == "emulator":
+            if phase in ("offline-build", "emulator"):
                 subprocess.run(["/usr/sbin/ip", "link", "set", "lo", "up"], check=True, timeout=5)
         expected = outer["kvm"]
         require(kvm_snapshot() == expected, "KVM_DEVICE_CHANGED")

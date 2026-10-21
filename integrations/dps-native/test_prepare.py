@@ -682,6 +682,59 @@ class KvmShimTests(unittest.TestCase):
         self.group = self.enterContext(patch.object(H.grp, "getgrnam", return_value=SimpleNamespace(gr_gid=78)))
         self.expected = dict(device=H.device_identity(self.info), acl=dict(present=False), kvm_gid=78)
 
+    def phase_prefix(self, phase, namespace, links):
+        """Mock the root bootstrap through its first credential-drop call."""
+        owner = SimpleNamespace(st_dev=1, st_ino=2, st_rdev=0, st_mode=stat.S_IFDIR | 0o700,
+            st_uid=1001, st_gid=1001, st_nlink=1, st_mtime_ns=3, st_ctime_ns=4)
+        receipt = SimpleNamespace(st_mode=stat.S_IFREG | 0o600, st_uid=1001, st_gid=1001, st_nlink=1, st_size=0)
+        state = unittest.mock.Mock(); state.lstat.return_value = owner; state.resolve.return_value = state
+        outer = dict(netns="net:[host]", credentials=dict(uid=[1001] * 3, gid=[1001] * 3), kvm=self.expected)
+        events = []
+        def drop(*args):
+            events.append("drop")
+            raise ValueError("STOP_AT_CREDENTIAL_DROP")
+        with patch.dict(H.os.environ, dict(SUDO_UID="1001", SUDO_GID="1001")), \
+             patch.object(H.os, "getuid", return_value=0), patch.object(H.os, "geteuid", return_value=0), \
+             patch.object(H.os, "getpid", return_value=1), patch.object(H.os, "open", side_effect=[22, 23]), \
+             patch.object(H.os, "fstat", side_effect=[owner, receipt]), patch.object(H.os, "close"), \
+             patch.object(H.os, "write", side_effect=lambda fd, raw: len(raw)), \
+             patch.object(H.os, "readlink", return_value=namespace), patch.object(H.socket, "if_nameindex", return_value=links), \
+             patch.object(H, "private_document", side_effect=[outer, dict(map="a" * 40)]), \
+             patch.object(H, "kvm_snapshot", return_value=self.expected), \
+             patch.object(H, "drop_credentials", side_effect=drop) as dropped, \
+             patch.object(H.subprocess, "run", side_effect=lambda *args, **kwargs: events.append("loopback")) as command:
+            with self.assertRaises(ValueError) as caught:
+                H.phase_child(state, phase)
+        return str(caught.exception), events, command, dropped
+
+    def test_private_offline_and_emulator_enable_only_loopback_once_before_drop(self):
+        for phase in H.PHASES:
+            with self.subTest(phase=phase):
+                namespace = "net:[host]" if phase == "public-build" else "net:[private]"
+                code, events, command, dropped = self.phase_prefix(phase, namespace, [(1, "lo")])
+                self.assertEqual(code, "STOP_AT_CREDENTIAL_DROP"); self.assertEqual(dropped.call_count, 1)
+                if phase in ("offline-build", "emulator"):
+                    self.assertEqual(events, ["loopback", "drop"])
+                    command.assert_called_once_with(["/usr/sbin/ip", "link", "set", "lo", "up"], check=True, timeout=5)
+                else:
+                    self.assertEqual(events, ["drop"]); command.assert_not_called()
+
+    def test_wrong_phase_namespace_rejects_before_loopback_or_drop(self):
+        for phase in H.PHASES:
+            with self.subTest(phase=phase):
+                namespace = "net:[private]" if phase == "public-build" else "net:[host]"
+                code, events, command, dropped = self.phase_prefix(phase, namespace, [(1, "lo")])
+                self.assertEqual(code, "PHASE_NETWORK_NAMESPACE"); self.assertEqual(events, [])
+                command.assert_not_called(); dropped.assert_not_called()
+
+    def test_unexpected_private_links_reject_before_loopback_or_drop(self):
+        for phase in ("kvm-probe", "offline-build", "emulator"):
+            for links in ([], [(1, "lo"), (2, "eth0")]):
+                with self.subTest(phase=phase, links=links):
+                    code, events, command, dropped = self.phase_prefix(phase, "net:[private]", links)
+                    self.assertEqual(code, "PHASE_PRIVATE_LINKS"); self.assertEqual(events, [])
+                    command.assert_not_called(); dropped.assert_not_called()
+
     def test_snapshot_binds_named_group_device_acl_and_rejects_changed_identity(self):
         self.assertEqual(H.kvm_snapshot(), self.expected)
         self.group.assert_called_with("kvm")

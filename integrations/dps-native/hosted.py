@@ -421,11 +421,147 @@ def run(label, argv, state, env, cwd=None, seconds=900):
     return log.read_bytes()
 
 
+def firewall_snapshot(raw):
+    """Schema-1 listing: omit only validated counter packet/byte statistics."""
+    require(type(raw) is bytes and 0 < len(raw) <= 1024**2, "FIREWALL_JSON_BYTES")
+    # Bound nesting before json.loads; quoted braces and escapes are not nesting.
+    depth, quoted, escaped = 0, False, False
+    for byte in raw:
+        if quoted:
+            if escaped: escaped = False
+            elif byte == 92: escaped = True
+            elif byte == 34: quoted = False
+        elif byte == 34: quoted = True
+        elif byte in (91, 123):
+            depth += 1
+            require(depth <= 32, "FIREWALL_JSON_DEPTH")
+        elif byte in (93, 125):
+            depth -= 1
+            require(depth >= 0, "FIREWALL_JSON_DEPTH")
+    require(depth == 0 and not quoted, "FIREWALL_JSON_SHAPE")
+
+    def object_pairs(pairs):
+        value = {}
+        for key, item in pairs:
+            require(key not in value, "FIREWALL_JSON_DUPLICATE")
+            value[key] = item
+        return value
+
+    def unsupported_number(_):
+        raise ValueError("FIREWALL_JSON_NUMBER")
+
+    def integer_number(value):
+        require(len(value) <= 21, "FIREWALL_JSON_NUMBER")
+        return int(value)
+
+    try:
+        tree = json.loads(raw, object_pairs_hook=object_pairs, parse_float=unsupported_number,
+                          parse_constant=unsupported_number, parse_int=integer_number)
+    except (UnicodeError, json.JSONDecodeError):
+        raise ValueError("FIREWALL_JSON_PARSE") from None
+    pending, nodes = [tree], 0
+    while pending:
+        value = pending.pop(); nodes += 1
+        require(nodes <= 65536, "FIREWALL_JSON_NODES")
+        if type(value) is dict: pending.extend(value.values())
+        elif type(value) is list: pending.extend(value)
+        elif type(value) is int:
+            require(-2**63 <= value < 2**64, "FIREWALL_JSON_NUMBER")
+    require(type(tree) is dict and set(tree) == {"nftables"} and type(tree["nftables"]) is list
+            and len(tree["nftables"]) > 0, "FIREWALL_JSON_ENVELOPE")
+    listing = tree["nftables"]
+    metadata = listing[0].get("metainfo") if type(listing[0]) is dict else None
+    require(type(metadata) is dict and set(metadata) == {"version", "release_name", "json_schema_version"}
+            and type(metadata["version"]) is str and type(metadata["release_name"]) is str
+            and type(metadata["json_schema_version"]) is int and metadata["json_schema_version"] == 1,
+            "FIREWALL_JSON_SCHEMA")
+    accepted, statistics = set(), []
+    kinds = {"table", "chain", "rule", "set", "map", "element", "flowtable", "counter", "quota",
+             "ct helper", "limit", "ct timeout", "ct expectation"}
+
+    def uint64(value):
+        return type(value) is int and 0 <= value < 2**64
+
+    def strip_counter(wrapper, named):
+        counter = wrapper["counter"]
+        if not named and type(counter) is str:
+            require(0 < len(counter) <= 256, "FIREWALL_COUNTER_REFERENCE")
+        else:
+            required = {"family", "table", "name", "packets", "bytes"} if named else {"packets", "bytes"}
+            require(type(counter) is dict and required <= set(counter)
+                    and set(counter) <= required | ({"handle"} if named else set()), "FIREWALL_COUNTER_SHAPE")
+            if named:
+                require(counter["family"] in ("ip", "ip6", "inet", "arp", "bridge", "netdev")
+                        and all(type(counter[key]) is str and 0 < len(counter[key]) <= 256 for key in ("table", "name"))
+                        and ("handle" not in counter or uint64(counter["handle"])), "FIREWALL_COUNTER_SHAPE")
+            require(uint64(counter["packets"]) and uint64(counter["bytes"]), "FIREWALL_COUNTER_VALUE")
+            statistics.append([counter.pop("packets"), counter.pop("bytes")])
+        accepted.add(id(wrapper))
+
+    for index, item in enumerate(listing):
+        require(type(item) is dict and len(item) == 1, "FIREWALL_LIST_SHAPE")
+        kind = next(iter(item))
+        if index == 0:
+            require(kind == "metainfo", "FIREWALL_JSON_SCHEMA")
+            continue
+        require(kind in kinds and type(item[kind]) is dict, "FIREWALL_LIST_SHAPE")
+        if kind == "counter": strip_counter(item, True)
+        elif kind == "rule":
+            rule = item[kind]
+            require(type(rule.get("expr")) is list and len(rule["expr"]) > 0, "FIREWALL_RULE_SHAPE")
+            for statement in rule["expr"]:
+                require(type(statement) is dict and len(statement) == 1, "FIREWALL_RULE_SHAPE")
+                if "counter" in statement: strip_counter(statement, False)
+    # Unsupported nested counter contexts fail closed rather than losing policy.
+    pending = [tree]
+    while pending:
+        value = pending.pop()
+        if type(value) is dict:
+            require("counter" not in value or id(value) in accepted, "FIREWALL_COUNTER_CONTEXT")
+            pending.extend(value.values())
+        elif type(value) is list: pending.extend(value)
+    canonical = lambda value: json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+    return dict(schema=1, raw=digest(raw), config=digest(canonical(tree)),
+                counters=digest(canonical(statistics)), counter_count=len(statistics))
+
+
+def firewall_comparison(before, after):
+    for value in (before, after):
+        require(type(value) is dict and set(value) == {"schema", "raw", "config", "counters", "counter_count"}
+                and type(value["schema"]) is int and value["schema"] == 1
+                and type(value["counter_count"]) is int and 0 <= value["counter_count"] <= 65536,
+                "FIREWALL_METADATA_SHAPE")
+        for key in ("raw", "config", "counters"):
+            item = value[key]
+            require(type(item) is dict and set(item) == {"bytes", "sha256"}
+                    and type(item["bytes"]) is int and 0 <= item["bytes"] < 2**64
+                    and type(item["sha256"]) is str and re.fullmatch("[0-9a-f]{64}", item["sha256"]),
+                    "FIREWALL_METADATA_SHAPE")
+    config_changed = before["config"] != after["config"] or before["counter_count"] != after["counter_count"]
+    counters_changed = before["counters"] != after["counters"]
+    raw_changed = before["raw"] != after["raw"]
+    classification = ("CONFIG_CHANGED" if config_changed else "COUNTERS_ONLY" if counters_changed
+                      else "REPRESENTATION_ONLY" if raw_changed else "UNCHANGED")
+    return dict(classification=classification, raw_changed=raw_changed,
+                config_changed=config_changed, counters_changed=counters_changed)
+
+
+def baseline_unchanged(before, after):
+    if before == after:
+        if type(before) is dict and "firewall" in before:
+            firewall_comparison(before["firewall"], after["firewall"])
+        return True
+    return (type(before) is dict and type(after) is dict and set(before) == set(after) and "firewall" in before
+            and {key: value for key, value in before.items() if key != "firewall"}
+                == {key: value for key, value in after.items() if key != "firewall"}
+            and not firewall_comparison(before["firewall"], after["firewall"])["config_changed"])
+
+
 def baseline():
-    rules = subprocess.check_output(["sudo", "-n", "nft", "list", "ruleset"], timeout=10)
+    rules = subprocess.check_output(["sudo", "-n", "nft", "-j", "list", "ruleset"], timeout=10)
     return dict(netns=os.readlink("/proc/self/ns/net"), routes=digest(Path("/proc/net/route").read_bytes()),
                 ipv6_routes=digest(Path("/proc/net/ipv6_route").read_bytes()),
-                resolver=digest(Path("/etc/resolv.conf").read_bytes()), firewall=digest(rules),
+                resolver=digest(Path("/etc/resolv.conf").read_bytes()), firewall=firewall_snapshot(rules),
                 credentials=credentials(), kvm=kvm_snapshot())
 
 
@@ -754,7 +890,7 @@ def baseline_diagnostic(before, after, capture_error):
     components = ("netns", "routes", "ipv6_routes", "resolver", "firewall", "credentials", "kvm")
     require(capture_error in (None, "BASELINE_NOT_CAPTURED", "BASELINE_BEFORE_UNAVAILABLE", "BASELINE_CAPTURE_FAILED"),
             "BASELINE_CAPTURE_CODE")
-    result = dict(schema=1, before=None, after=None, changed_components=None,
+    result = dict(schema=2, before=None, after=None, changed_components=None, firewall_comparison=None,
                   capture_error=capture_error, diagnostic_error=None)
 
     def integer(value):
@@ -767,7 +903,12 @@ def baseline_diagnostic(before, after, capture_error):
     def snapshot(value):
         if type(value) is not dict or set(value) != set(components): return False
         if type(value["netns"]) is not str or re.fullmatch(r"net:\[[0-9]{1,20}\]", value["netns"]) is None: return False
-        if not all(fingerprint(value[key]) for key in components[1:5]): return False
+        if not all(fingerprint(value[key]) for key in components[1:4]): return False
+        firewall = value["firewall"]
+        if (type(firewall) is not dict or set(firewall) != {"schema", "raw", "config", "counters", "counter_count"}
+                or type(firewall["schema"]) is not int or firewall["schema"] != 1
+                or not all(fingerprint(firewall[key]) for key in ("raw", "config", "counters"))
+                or not integer(firewall["counter_count"]) or firewall["counter_count"] > 65536): return False
         creds = value["credentials"]
         if type(creds) is not dict or set(creds) != {"uid", "gid", "groups"}: return False
         if not all(type(creds[key]) is list and len(creds[key]) == 3
@@ -792,6 +933,7 @@ def baseline_diagnostic(before, after, capture_error):
         else: result["diagnostic_error"] = "BASELINE_METADATA_SHAPE"
     if result["before"] is not None and result["after"] is not None:
         result["changed_components"] = [key for key in components if before[key] != after[key]]
+        result["firewall_comparison"] = firewall_comparison(before["firewall"], after["firewall"])
     return result
 
 
@@ -817,7 +959,7 @@ def finalize(state, evidence, before, complete, original, control_mode=None):
                     unchanged, capture_error = False, "BASELINE_BEFORE_UNAVAILABLE"
                 else:
                     after = baseline()
-                    unchanged, capture_error = after == before, None
+                    unchanged, capture_error = baseline_unchanged(before, after), None
             except BaseException as error:
                 errors.append(failure_code(error)); unchanged = False
                 capture_error = "BASELINE_CAPTURE_FAILED"

@@ -243,6 +243,138 @@ class LifetimeShimTests(unittest.TestCase):
             spawn.assert_not_called()
 
 
+def inert_firewall():
+    return dict(nftables=[dict(metainfo=dict(version="1.0.9", release_name="inert", json_schema_version=1)),
+        dict(table=dict(family="inet", name="fixture", handle=1)),
+        dict(chain=dict(family="inet", table="fixture", name="input", handle=2, type="filter", hook="input", prio=0, policy="drop")),
+        dict(counter=dict(family="inet", table="fixture", name="named", packets=3, bytes=100)),
+        dict(rule=dict(family="inet", table="fixture", chain="input", handle=3, expr=[
+            dict(match=dict(op="==", left=dict(payload=dict(protocol="tcp", field="dport")), right=443)),
+            dict(counter=dict(packets=4, bytes=200)), dict(accept=None)])),
+        dict(rule=dict(family="inet", table="fixture", chain="input", handle=4, expr=[dict(counter="named"), dict(drop=None)])),
+        dict(quota=dict(family="inet", table="fixture", name="budget", bytes=4096, used=100, inv=False)),
+        dict(set=dict(family="inet", table="fixture", name="members", type="ipv4_addr", timeout=100,
+            elem=[dict(elem=dict(val="192.0.2.1", timeout=100, expires=90))]))])
+
+
+class FirewallSnapshotTests(unittest.TestCase):
+    """Synthetic JSON mutation controls only; no nft, sudo or host reads."""
+    def snapshot(self, value):
+        return H.firewall_snapshot(json.dumps(value, separators=(",", ":")).encode())
+
+    def test_only_actual_anonymous_and_named_statistics_are_excluded(self):
+        before = inert_firewall(); after = copy.deepcopy(before)
+        after["nftables"][3]["counter"].update(packets=2**64 - 1, bytes=2**64 - 1)
+        after["nftables"][4]["rule"]["expr"][1]["counter"].update(packets=0, bytes=0)
+        # Representation may change alongside statistics; configuration must not.
+        left = self.snapshot(before)
+        right = H.firewall_snapshot(json.dumps(after, indent=2, sort_keys=True).encode())
+        self.assertEqual(left["counter_count"], 2); self.assertEqual(left["config"], right["config"])
+        self.assertNotEqual(left["counters"], right["counters"]); self.assertNotEqual(left["raw"], right["raw"])
+        self.assertEqual(H.firewall_comparison(left, right), dict(classification="COUNTERS_ONLY",
+            raw_changed=True, config_changed=False, counters_changed=True))
+        self.assertNotIn("192.0.2.1", json.dumps(left))
+
+    def test_named_handle_is_optional_and_every_identity_field_is_preserved(self):
+        before = inert_firewall(); original = self.snapshot(before)
+        for key, value in (("handle", 9), ("family", "ip"), ("table", "changed"), ("name", "changed")):
+            with self.subTest(key=key):
+                changed = copy.deepcopy(before); changed["nftables"][3]["counter"][key] = value
+                self.assertEqual(H.firewall_comparison(original, self.snapshot(changed))["classification"], "CONFIG_CHANGED")
+
+    def test_policy_mutations_including_other_stateful_fields_never_compare_equal(self):
+        before = inert_firewall(); original = self.snapshot(before)
+        mutations = [
+            lambda x: x[2]["chain"].update(policy="accept"),
+            lambda x: x[4]["rule"]["expr"][0]["match"].update(right=80),
+            lambda x: x[4]["rule"]["expr"][2].update(accept="changed"),
+            lambda x: x[4]["rule"]["expr"].reverse(),
+            lambda x: x.reverse(),
+            lambda x: x[6]["quota"].update(bytes=8192),
+            lambda x: x[6]["quota"].update(used=101),
+            lambda x: x[7]["set"].update(timeout=101),
+            lambda x: x[7]["set"]["elem"][0]["elem"].update(expires=89),
+            lambda x: x[7]["set"]["elem"].append("192.0.2.2"),
+            lambda x: x[4]["rule"].update(future_policy_field=dict(bytes=7, packets=8)),
+        ]
+        for index, mutate in enumerate(mutations):
+            with self.subTest(index=index):
+                changed = copy.deepcopy(before)
+                # Keep metainfo first while changing the order of real objects.
+                if index == 4: changed["nftables"][1:] = list(reversed(changed["nftables"][1:]))
+                else: mutate(changed["nftables"])
+                result = H.firewall_comparison(original, self.snapshot(changed))
+                self.assertTrue(result["config_changed"]); self.assertEqual(result["classification"], "CONFIG_CHANGED")
+
+    def test_malformed_or_unknown_counter_shapes_and_contexts_fail_closed(self):
+        bad_values = [None, {}, {"packets": 1}, {"packets": True, "bytes": 1},
+            {"packets": -1, "bytes": 1}, {"packets": 2**64, "bytes": 1},
+            {"packets": 1, "bytes": 1, "quota": 1}, ""]
+        for value in bad_values:
+            with self.subTest(value=value):
+                changed = inert_firewall(); changed["nftables"][4]["rule"]["expr"][1]["counter"] = value
+                code = "FIREWALL_JSON_NUMBER" if type(value) is dict and value.get("packets") == 2**64 else "FIREWALL_COUNTER_"
+                with self.assertRaisesRegex(ValueError, code): self.snapshot(changed)
+        for mutation in (lambda x: x[3]["counter"].update(comment="unsupported"),
+                         lambda x: x[4]["rule"]["expr"].append(dict(meter=dict(stmt=dict(counter=dict(packets=1, bytes=2)))))):
+            changed = inert_firewall(); mutation(changed["nftables"])
+            with self.assertRaisesRegex(ValueError, "FIREWALL_COUNTER_"): self.snapshot(changed)
+
+    def test_duplicate_keys_schema_and_malformed_json_reject(self):
+        for raw in (b'{"nftables":[],"nftables":[]}', b'{"nftables":[]}', b'{}', b'[]', b'{', b'\xff'):
+            with self.subTest(raw=raw), self.assertRaisesRegex(ValueError, "FIREWALL_JSON_"):
+                H.firewall_snapshot(raw)
+        for schema in (True, 0, 2, "1"):
+            changed = inert_firewall(); changed["nftables"][0]["metainfo"]["json_schema_version"] = schema
+            with self.assertRaisesRegex(ValueError, "FIREWALL_JSON_SCHEMA"): self.snapshot(changed)
+        valid = self.snapshot(inert_firewall())
+        for mutation in (lambda x: x.update(schema=2), lambda x: x.update(unknown=1),
+                         lambda x: x["raw"].update(sha256="raw policy")):
+            malformed = copy.deepcopy(valid); mutation(malformed)
+            with self.assertRaisesRegex(ValueError, "FIREWALL_METADATA_SHAPE"):
+                H.baseline_unchanged(dict(firewall=malformed), dict(firewall=malformed))
+
+    def test_parser_byte_depth_node_and_numeric_bounds(self):
+        with patch.object(H.json, "loads") as loads:
+            with self.assertRaisesRegex(ValueError, "FIREWALL_JSON_BYTES"): H.firewall_snapshot(b" " * (1024**2 + 1))
+            loads.assert_not_called()
+            with self.assertRaisesRegex(ValueError, "FIREWALL_JSON_DEPTH"): H.firewall_snapshot(b"[" * 33 + b"]" * 33)
+            loads.assert_not_called()
+        with self.assertRaisesRegex(ValueError, "FIREWALL_JSON_NODES"):
+            H.firewall_snapshot(b"[" + b"0," * 65536 + b"0]")
+        for value in ("NaN", "Infinity", "1.5", str(2**64), "9" * 100):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "FIREWALL_JSON_NUMBER"):
+                H.firewall_snapshot(('{"nftables":[' + value + ']}').encode())
+
+    def test_representation_only_requires_identical_canonical_configuration_and_counters(self):
+        document = inert_firewall()
+        before = self.snapshot(document)
+        after = H.firewall_snapshot(json.dumps(document, indent=2, sort_keys=True).encode())
+        self.assertEqual(H.firewall_comparison(before, after), dict(classification="REPRESENTATION_ONLY",
+            raw_changed=True, config_changed=False, counters_changed=False))
+        self.assertEqual(H.firewall_comparison(before, before)["classification"], "UNCHANGED")
+
+    def test_counter_presence_placement_and_named_reference_are_configuration(self):
+        original = self.snapshot(inert_firewall())
+        for mode in ("remove", "add", "move", "reference"):
+            changed = inert_firewall(); expressions = changed["nftables"][4]["rule"]["expr"]
+            if mode == "remove": expressions.pop(1)
+            elif mode == "add": expressions.insert(1, dict(counter=dict(packets=0, bytes=0)))
+            elif mode == "move": expressions.insert(0, expressions.pop(1))
+            else: changed["nftables"][5]["rule"]["expr"][0]["counter"] = "another"
+            with self.subTest(mode=mode):
+                self.assertTrue(H.firewall_comparison(original, self.snapshot(changed))["config_changed"])
+
+    def test_baseline_uses_single_existing_read_with_json_flag_and_same_timeout(self):
+        raw = json.dumps(inert_firewall()).encode()
+        with patch.object(H.subprocess, "check_output", return_value=raw) as command, \
+             patch.object(H.Path, "read_bytes", return_value=b"inert"), patch.object(H.os, "readlink", return_value="net:[123]"), \
+             patch.object(H, "credentials", return_value={}), patch.object(H, "kvm_snapshot", return_value={}):
+            snapshot = H.baseline()
+        command.assert_called_once_with(["sudo", "-n", "nft", "-j", "list", "ruleset"], timeout=10)
+        self.assertEqual(snapshot["firewall"], H.firewall_snapshot(raw))
+
+
 class BaselineDiagnosticShimTests(unittest.TestCase):
     """Fixed inert snapshots and ordinary owned files; no host baseline reads."""
     def setUp(self):
@@ -254,7 +386,7 @@ class BaselineDiagnosticShimTests(unittest.TestCase):
         self.enterContext(patch.object(H.signal, "getitimer", return_value=(0.0, 0.0)))
         self.before = dict(netns="net:[123]", routes=dict(bytes=896, sha256="a" * 64),
             ipv6_routes=dict(bytes=900, sha256="a" * 64), resolver=dict(bytes=970, sha256="a" * 64),
-            firewall=dict(bytes=2804, sha256="a" * 64),
+            firewall=H.firewall_snapshot(json.dumps(inert_firewall()).encode()),
             credentials=dict(uid=[1001] * 3, gid=[1001] * 3, groups=[4, 1001]),
             kvm=dict(kvm_gid=993, acl=dict(present=False), device=dict(dev=6, ino=435, rdev=2792,
                 mode=8624, uid=0, gid=993, nlink=1, mtime_ns=123, ctime_ns=123)))
@@ -270,8 +402,9 @@ class BaselineDiagnosticShimTests(unittest.TestCase):
         capture.assert_called_once_with()
         self.assertTrue(result["success"]); self.assertFalse(state.exists())
         diagnostic = result["baseline_comparison"]
-        self.assertEqual(diagnostic, dict(schema=1, before=self.before, after=self.before,
-            changed_components=[], capture_error=None, diagnostic_error=None))
+        self.assertEqual(diagnostic, dict(schema=2, before=self.before, after=self.before,
+            changed_components=[], capture_error=None, diagnostic_error=None,
+            firewall_comparison=dict(classification="UNCHANGED", raw_changed=False, config_changed=False, counters_changed=False)))
         self.assertEqual(json.loads((evidence / "result.json").read_text()), result)
 
     def test_every_component_difference_fails_exact_comparison_and_retains_both(self):
@@ -281,6 +414,9 @@ class BaselineDiagnosticShimTests(unittest.TestCase):
                 if component == "netns": after[component] = "net:[124]"
                 elif component == "credentials": after[component]["groups"] = [1001]
                 elif component == "kvm": after[component]["device"]["ctime_ns"] += 1
+                elif component == "firewall":
+                    document = inert_firewall(); document["nftables"][2]["chain"]["policy"] = "accept"
+                    after[component] = H.firewall_snapshot(json.dumps(document).encode())
                 else: after[component]["sha256"] = "b" * 64
                 state, evidence = self.owned(component)
                 with patch.object(self.life, "drain_all"), patch.object(H, "baseline", return_value=after) as capture:
@@ -301,8 +437,8 @@ class BaselineDiagnosticShimTests(unittest.TestCase):
         capture.assert_called_once_with()
         self.assertEqual(result["cleanup_errors"], ["OSError", "HOST_BASELINE_UNCONFIRMED"])
         self.assertEqual(result["primary_failure"], "ORIGINAL_FAILURE")
-        self.assertEqual(result["baseline_comparison"], dict(schema=1, before=self.before, after=None,
-            changed_components=None, capture_error="BASELINE_CAPTURE_FAILED", diagnostic_error=None))
+        self.assertEqual(result["baseline_comparison"], dict(schema=2, before=self.before, after=None,
+            changed_components=None, capture_error="BASELINE_CAPTURE_FAILED", diagnostic_error=None, firewall_comparison=None))
         self.assertNotIn("private error detail", (evidence / "result.json").read_text())
         self.assertFalse(state.exists()); self.assertFalse(result["success"])
 
@@ -358,6 +494,19 @@ class BaselineDiagnosticShimTests(unittest.TestCase):
             self.assertEqual(json.loads((evidence / ("control-" + mode + "-result.json")).read_text()), nested[mode])
             self.assertEqual(nested[mode]["baseline_comparison"]["before"], self.before)
             self.assertEqual(nested[mode]["baseline_comparison"]["after"], self.before)
+
+    def test_counter_changes_can_pass_config_check_while_raw_difference_is_retained(self):
+        after = copy.deepcopy(self.before); document = inert_firewall()
+        document["nftables"][3]["counter"]["packets"] += 1
+        after["firewall"] = H.firewall_snapshot(json.dumps(document).encode())
+        state, evidence = self.owned("counter-only")
+        with patch.object(self.life, "drain_all"), patch.object(H, "baseline", return_value=after):
+            result = H.finalize(state, evidence, self.before, True, None)
+        self.assertTrue(result["success"]); self.assertTrue(result["host_routes_dns_firewall_unchanged"])
+        self.assertEqual(result["baseline_comparison"]["changed_components"], ["firewall"])
+        self.assertEqual(result["baseline_comparison"]["firewall_comparison"]["classification"], "COUNTERS_ONLY")
+        self.assertNotEqual(result["baseline_comparison"]["before"]["firewall"]["raw"],
+                            result["baseline_comparison"]["after"]["firewall"]["raw"])
 
 
 class KvmShimTests(unittest.TestCase):

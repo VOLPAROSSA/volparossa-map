@@ -240,9 +240,10 @@ python3 -B -m unittest discover -s integrations/dps-native -p 'test_*.py' -v
 git diff --check
 ```
 
-These pass for the current authored correction: source bindings plus 35 inert
+These pass for the current authored correction: source bindings plus 45 inert
 tests (seven Python/Git/archive preparation tests, six lifetime orchestration
-shims, 15 KVM/phase/input-file shims, and seven baseline-diagnostic shims).
+shims, 15 KVM/phase/input-file shims, eight baseline-diagnostic shims, and nine
+synthetic firewall JSON tests).
 The shims cover deferred signal delivery until child ownership is registered,
 unblocked child signals without a pre-exec hook, repeated INT/TERM deadlines,
 original-failure precedence, honest incomplete cleanup/state preservation,
@@ -305,10 +306,14 @@ process group if necessary. Namespace bootstrap permanently drops all UID/GID
 identities before workloads and clears supplementary groups for all builds.
 Only the KVM probe and emulator receive the one validated device-derived KVM
 group. No host DNS, routes, nftables rules, VPN or sysctls are changed.
-Before/after route/resolver/firewall, parent credentials and KVM metadata/ACL
-observations must match. Command output, elapsed
+Before/after route/resolver, parent credentials and KVM metadata/ACL observations
+must match exactly. Firewall configuration must match under the counter-only
+projection documented below; raw fingerprints and classification remain visible.
+Workload command output, elapsed
 wall time and sampled descendant RSS are bounded; the RSS monitor is not a hard
-kernel cgroup memory limit. Commands register and drain their process groups. Runtime PID namespace
+kernel cgroup memory limit. The existing firewall snapshot command captures into
+an unbounded buffer; only its subsequent parser input is bounded to 1 MiB.
+Commands register and drain their process groups. Runtime PID namespace
 termination supplies the final descendant boundary; source checks alone do not
 establish actual drain. Failed cleanup or changed baselines fail the job.
 
@@ -445,7 +450,7 @@ comparison-volatility mechanisms, **not established causes of this run**. See th
 [official nft manual](https://netfilter.org/projects/nftables/manpage.html) and
 [Linux IPv6 renderer](https://github.com/torvalds/linux/blob/v6.8/net/ipv6/ip6_fib.c#L2338-L2365).
 
-The current diagnostic-only candidate retains the already collected before/after
+The diagnostic correction retains the already collected before/after
 snapshots in each existing finalizer receipt, plus a fixed seven-component changed
 list (`netns`, `routes`, `ipv6_routes`, `resolver`, `firewall`, `credentials`, `kvm`).
 Snapshots accept only fixed metadata and hash/size fields; raw route, DNS and nft
@@ -457,15 +462,75 @@ If the existing fields alone cannot fit, no oversized receipt is written and the
 existing failure-precedence rules apply. Nested control result receipts follow
 the existing retention path before private-state removal.
 
-Exact baseline equality and every existing acceptance condition remain required.
-This candidate adds no host command, second snapshot read, retry, normalization,
-baseline replacement, signal handler or cleanup-time extension. Seven inert tests
+That correction kept exact baseline equality and every existing acceptance condition.
+It added no host command, second snapshot read, retry, normalization,
+baseline replacement, signal handler or cleanup-time extension. Its seven inert tests
 cover matching snapshots, each component changing, capture failure, an unavailable
 before-snapshot, rejection of raw/unknown metadata, the whole-receipt byte bound,
-and nested retention. They establish receipt orchestration only. The diagnostic
-candidate is **unrun on a hosted runner**; the next actual failure must identify
-its changed component before any narrower configuration-versus-counter comparison
-can be considered.
+and nested retention established receipt orchestration only. The actual diagnostic
+attempt below identified the changed component without establishing its raw cause.
+
+### Firewall configuration comparison candidate: hosted unrun
+
+Published diagnostic source `33c801783e6cf2356d299189774b78135b6140a4` failed actual
+hosted run [39670953044](https://github.com/VOLPAROSSA/volparossa-map/actions/runs/39670953044)
+before acquisition with `CANCELLATION_CONTROL_FAILED`. Artifact `12380230702.zip`
+is 7,199 bytes, SHA-256
+`869c2229658af191729f378eebb3c90b986fb7665de79b9cc594c60445c01284`;
+the 69,949-byte original log SHA-256 is
+`13d2bb3c75a48247d12e54f7a5dd201d2c2c291b5ac6d67102c3f73936386501`.
+INT-to-TERM and outer receipts identify exactly `firewall` as changed, with no
+capture/diagnostic error. The before/after firewall lengths are both 2,804 bytes
+with different hashes. Term-first matches completely. All other baseline
+components match, but retained hashes cannot establish what changed inside the
+firewall output. Neither this run nor its predecessor is proved benign counters.
+
+The current candidate changes the one existing snapshot command to
+`sudo -n nft -j list ruleset`, retaining its ten-second timeout and subprocess
+ownership mechanics. No extra command/read, retry, baseline replacement, host
+write or lifecycle/deadline change is introduced. The command's captured output
+remains an **unbounded subprocess buffer**; the 1 MiB check bounds parsing only.
+Before JSON parsing, a quote/escape-aware scan limits nesting to 32. Parsing
+rejects duplicate keys, noninteger/nonfinite numbers and unsupported schema;
+an iterative traversal limits values/containers to 65,536 before projection.
+Integers are restricted to signed-64/unsigned-64 range. Malformed output fails
+closed before any comparison or expensive acquisition.
+
+The schema-1 counter forms are checked against the upstream
+[libnftables JSON manual distributed by Debian](https://manpages.debian.org/trixie/libnftables1/libnftables-json.5.en.html).
+Only direct rule statements containing exactly `packets` and `bytes`, and named
+counter objects with family/table/name, those statistics and an optional handle,
+have their two uint64 statistics removed from the configuration projection.
+Named string references are retained. Unknown fields or nested counter contexts
+are rejected. All remaining fields and array order are preserved, including
+selectors, verdicts, rule order, counter presence/placement, sets, expiry and quota
+threshold/used values. This does not use blanket stateless output.
+
+Each firewall snapshot retains schema, raw/configuration/counter-statistic
+hash-and-size fingerprints, and counter count. No raw rules, names or addresses
+are published. The baseline diagnostic schema is now `2`, with the same seven
+raw-observation changed components plus a closed firewall classification:
+
+- `UNCHANGED`: all fingerprints match.
+- `COUNTERS_ONLY`: canonical counter statistics differ while every other parsed
+  configuration field and order match; raw representation may differ as well.
+- `REPRESENTATION_ONLY`: raw bytes differ, canonical configuration and statistics match.
+- `CONFIG_CHANGED`: projected configuration or counter count differs; comparison fails.
+
+The existing `host_routes_dns_firewall_unchanged` acceptance field now means
+firewall **configuration** matched, with exact equality for the other six baseline
+components. Raw observation differences remain in `changed_components`, even
+when valid counter-only or representation-only changes permit that check to pass.
+Nested controls automatically use this same baseline/finalizer path. KVM phase
+checks still consume unchanged netns/credentials/KVM fields; typed diagnostic
+validation accepts the new firewall record, and the 16 KiB result bound remains.
+
+The 45 inert tests include counter-only acceptance, raw difference retention,
+named counters without handles, preserved identities/order/policy/quota/expiry,
+counter addition/removal/placement, unknown shapes, parser bounds and one-command
+acquisition semantics. The candidate has **not run on a hosted runner**. Its
+synthetic counter evidence does not explain historical failures or establish
+complete cancellation, emulator, Android/JNI or physical-positioning acceptance.
 
 ### Catchable cancellation requirements: acceptance incomplete
 

@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Inert Python/Git/archive tests only; none executes Rust/JNI/Android or a controller."""
 import copy
+import ast
 import errno
+from contextlib import ExitStack
 from types import SimpleNamespace
 import json
 from pathlib import Path
@@ -493,8 +495,11 @@ class BaselineDiagnosticShimTests(unittest.TestCase):
                 self.assertNotIn("PRIVATE_RAW_CONTENT", json.dumps(diagnostic))
         state, evidence = self.owned("malformed")
         with patch.object(self.life, "drain_all"), patch.object(H, "baseline", return_value=malformed):
-            result = H.finalize(state, evidence, malformed, True, None)
-        self.assertTrue(result["success"]); self.assertTrue(result["host_routes_dns_firewall_unchanged"])
+            with self.assertRaisesRegex(RuntimeError, "CLEANUP_UNCONFIRMED"):
+                H.finalize(state, evidence, malformed, True, None)
+        result = json.loads((evidence / "result.json").read_text())
+        self.assertFalse(result["success"]); self.assertFalse(result["host_routes_dns_firewall_unchanged"])
+        self.assertFalse(result["host_configuration_checkpoint_accepted"])
         self.assertEqual(result["baseline_comparison"]["diagnostic_error"], "BASELINE_METADATA_SHAPE")
 
     def test_complete_receipt_bound_omits_snapshots_preserving_existing_errors(self):
@@ -1352,6 +1357,299 @@ class EmulatorObservationTests(unittest.TestCase):
         self.assertFalse(result["success"])
         self.assertEqual(json.loads((evidence / "emulator-failure-diagnostic.json").read_text()), diagnostic)
         self.assertFalse((evidence / "emulator.private.log").exists()); self.assertFalse((evidence / "adb.private.log").exists())
+
+
+class KvmConfigurationTests(unittest.TestCase):
+    """Pure replay and mocked phase/file orchestration; no actual device or namespace."""
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name); self.next_state = 0
+        self.life = H.Lifetime()
+        self.enterContext(patch.object(H, "ACTIVE", self.life))
+        self.enterContext(patch.object(H.signal, "setitimer"))
+        self.enterContext(patch.object(H.signal, "getitimer", return_value=(0.0, 0.0)))
+        self.before = dict(netns="net:[123]", routes=dict(bytes=896, sha256="a"*64),
+            ipv6_routes=dict(bytes=900, sha256="a"*64), resolver=dict(bytes=970, sha256="a"*64),
+            firewall=H.firewall_snapshot(json.dumps(inert_firewall()).encode()),
+            credentials=dict(uid=[1001]*3, gid=[1001]*3, groups=[4,1001]),
+            kvm=dict(kvm_gid=993, acl=dict(present=False), device=dict(dev=6, ino=435, rdev=2792,
+                mode=8624, uid=0, gid=993, nlink=1, mtime_ns=123, ctime_ns=123)))
+        self.expected = self.before["kvm"]
+        self.after = copy.deepcopy(self.before)
+        self.after["kvm"]["device"].update(mtime_ns=456, ctime_ns=789)
+
+    def state(self):
+        self.next_state += 1
+        state = self.root / str(self.next_state); state.mkdir()
+        return state, self.root / (str(self.next_state) + "-evidence")
+
+    def finalize(self, *, before=None, after=None, complete=True, original=None, control_mode=None):
+        state, evidence = self.state()
+        before = self.before if before is None else before
+        after = self.after if after is None else after
+        with patch.object(self.life, "drain_all"), patch.object(H, "baseline", return_value=after):
+            try: result = H.finalize(state, evidence, before, complete, original, control_mode)
+            except RuntimeError:
+                result = json.loads((evidence / "result.json").read_text())
+        return result
+
+    def test_timestamp_replay_preserves_raw_values_and_strict_mode_rejects(self):
+        saved = copy.deepcopy((self.expected, self.after["kvm"]))
+        comparison = H.kvm_comparison(*saved)
+        self.assertEqual(comparison, dict(classification="TIMESTAMPS_ONLY", raw_unchanged=False, configuration_unchanged=True))
+        self.assertEqual(H.kvm_comparison(self.expected, self.expected)["classification"], "UNCHANGED")
+        self.assertFalse(H.baseline_unchanged(self.before, self.after))
+        self.assertTrue(H.baseline_unchanged(self.before, self.after, kvm_configuration=True))
+        self.assertEqual(saved, (self.expected, self.after["kvm"]))
+        self.assertEqual(self.after["kvm"]["device"]["mtime_ns"], 456)
+        self.assertEqual(self.after["kvm"]["device"]["ctime_ns"], 789)
+
+    def test_every_authority_field_and_acl_digest_change_fails_even_with_timestamps(self):
+        for timestamps in (False, True):
+            for key in ("dev", "ino", "rdev", "mode", "uid", "gid", "nlink", "acl_present", "acl_bytes", "acl_sha", "named_gid"):
+                before = copy.deepcopy(self.before)
+                before["kvm"]["acl"] = dict(present=True, bytes=4, sha256="a"*64)
+                after = copy.deepcopy(before)
+                if timestamps: after["kvm"]["device"].update(mtime_ns=456, ctime_ns=789)
+                if key == "acl_present": after["kvm"]["acl"] = dict(present=False)
+                elif key == "acl_bytes": after["kvm"]["acl"]["bytes"] += 1
+                elif key == "acl_sha": after["kvm"]["acl"]["sha256"] = "b"*64
+                elif key == "named_gid": after["kvm"]["kvm_gid"] += 1
+                else: after["kvm"]["device"][key] += 1
+                with self.subTest(key=key, timestamps=timestamps):
+                    if key in ("gid", "named_gid", "rdev"):
+                        with self.assertRaisesRegex(ValueError, "KVM_METADATA_SHAPE"):
+                            H.kvm_comparison(before["kvm"], after["kvm"])
+                        with self.assertRaises(ValueError): H.baseline_unchanged(before, after, kvm_configuration=True)
+                    else:
+                        self.assertEqual(H.kvm_comparison(before["kvm"], after["kvm"])["classification"], "CONFIGURATION_DIFFERENCE")
+                        self.assertFalse(H.baseline_unchanged(before, after, kvm_configuration=True))
+            after = copy.deepcopy(self.after if timestamps else self.before)
+            after["kvm"]["device"]["gid"] = after["kvm"]["kvm_gid"] = 994
+            self.assertFalse(H.baseline_unchanged(self.before, after, kvm_configuration=True))
+
+    def test_missing_extra_and_wrong_types_validate_before_identical_snapshot_equality(self):
+        malformed = [None, [], {}, dict(self.expected, unknown="PRIVATE")]
+        for key in self.expected:
+            item = copy.deepcopy(self.expected); item.pop(key); malformed.append(item)
+        for key in self.expected["device"]:
+            for value in (None, True, "1", 1.0, 2**64):
+                item = copy.deepcopy(self.expected); item["device"][key] = value; malformed.append(item)
+            item = copy.deepcopy(self.expected); item["device"].pop(key); malformed.append(item)
+        for change in (dict(present=0), dict(present=1), dict(present=False, extra=1),
+            dict(present=True, bytes=True, sha256="a"*64), dict(present=True, bytes=4097, sha256="a"*64),
+            dict(present=True, bytes=4, sha256="PRIVATE"), dict(present=True, bytes=4, sha256="a"*64, extra=1)):
+            item = copy.deepcopy(self.expected); item["acl"] = change; malformed.append(item)
+        item = copy.deepcopy(self.expected); item["device"]["extra"] = 1; malformed.append(item)
+        for key, value in (("mode", stat.S_IFREG | 0o660), ("mode", (1 << 32) | stat.S_IFCHR),
+                           ("rdev", H.os.makedev(1, 3)), ("uid", 2**32), ("nlink", 0)):
+            item = copy.deepcopy(self.expected); item["device"][key] = value; malformed.append(item)
+        for value in (0, True, "993", 993.0):
+            item = copy.deepcopy(self.expected); item["kvm_gid"] = value; malformed.append(item)
+        for item in malformed:
+            with self.subTest(shape=type(item).__name__), self.assertRaisesRegex(ValueError, "KVM_METADATA_SHAPE"):
+                H.kvm_comparison(item, copy.deepcopy(item))
+            with self.assertRaises(ValueError): H.kvm_comparison(self.expected, item)
+            with self.assertRaises(ValueError): H.kvm_comparison(item, self.expected)
+
+    def test_configuration_baseline_requires_complete_typed_metadata_and_preserves_other_components(self):
+        for component in ("netns", "routes", "ipv6_routes", "resolver", "credentials", "firewall"):
+            after = copy.deepcopy(self.after)
+            if component == "netns": after[component] = "net:[124]"
+            elif component == "credentials": after[component]["groups"] = [1001]
+            elif component == "firewall":
+                document = inert_firewall(); document["nftables"][2]["chain"]["policy"] = "accept"
+                after[component] = H.firewall_snapshot(json.dumps(document).encode())
+            else: after[component]["sha256"] = "b"*64
+            self.assertFalse(H.baseline_unchanged(self.before, after, kvm_configuration=True))
+        for component in self.before:
+            missing = copy.deepcopy(self.before); missing.pop(component)
+            with self.assertRaises(ValueError): H.baseline_unchanged(missing, missing, kvm_configuration=True)
+            wrong = copy.deepcopy(self.before); wrong[component] = "PRIVATE"
+            with self.assertRaises(ValueError): H.baseline_unchanged(wrong, wrong, kvm_configuration=True)
+        unknown = dict(self.before, extra=1)
+        with self.assertRaises(ValueError): H.baseline_unchanged(unknown, unknown, kvm_configuration=True)
+        for mode in (1, None, "true"):
+            with self.assertRaises(ValueError): H.baseline_unchanged(self.before, self.after, kvm_configuration=mode)
+        document = inert_firewall(); document["nftables"][4]["rule"]["expr"][1]["counter"]["packets"] += 1
+        after = copy.deepcopy(self.after); after["firewall"] = H.firewall_snapshot(json.dumps(document).encode())
+        self.assertTrue(H.baseline_unchanged(self.before, after, kvm_configuration=True))
+
+    def test_completed_finalizer_versions_raw_and_configuration_verdicts_separately(self):
+        result = self.finalize()
+        self.assertEqual(result["schema"], 3); self.assertTrue(result["success"])
+        self.assertEqual(result["baseline_acceptance_mode"], "COMPLETED_EMULATOR_CONFIGURATION")
+        self.assertFalse(result["host_routes_dns_firewall_unchanged"])
+        self.assertTrue(result["host_configuration_checkpoint_accepted"])
+        self.assertEqual(result["kvm_comparison"]["classification"], "TIMESTAMPS_ONLY")
+        self.assertEqual(result["baseline_comparison"]["before"], self.before)
+        self.assertEqual(result["baseline_comparison"]["after"], self.after)
+        self.assertEqual(result["baseline_comparison"]["changed_components"], ["kvm"])
+        self.assertEqual(result["cleanup_errors"], [])
+        self.assertTrue(result["owned_state_removed"] and result["registered_groups_drained"])
+        self.assertLessEqual(len(json.dumps(result, indent=2).encode()), 16384)
+
+    def test_incomplete_or_failed_instrumentation_and_controls_never_select_configuration_mode(self):
+        for complete, original, mode in ((False, None, None), (False, ValueError("ACTUAL_INSTRUMENTATION_RESULT"), None),
+                (True, ValueError("ORIGINAL_FAILURE"), None), (True, None, "control")):
+            result = self.finalize(complete=complete, original=original, control_mode=mode)
+            self.assertFalse(result["success"]); self.assertFalse(result["host_configuration_checkpoint_accepted"])
+            self.assertEqual(result["baseline_acceptance_mode"], "STRICT_KVM_METADATA")
+            self.assertIn("HOST_BASELINE_UNCONFIRMED", result["cleanup_errors"])
+            self.assertEqual(result["primary_failure"], H.failure_code(original))
+
+    def test_capture_and_cleanup_failures_never_gain_success_or_replace_original(self):
+        state, evidence = self.state(); original = ValueError("ORIGINAL_FAILURE")
+        with patch.object(self.life, "drain_all"), patch.object(H, "baseline", side_effect=OSError(errno.EIO, "PRIVATE capture error")):
+            result = H.finalize(state, evidence, self.before, True, original)
+        self.assertFalse(result["success"]); self.assertFalse(result["host_configuration_checkpoint_accepted"])
+        self.assertEqual(result["primary_failure"], "ORIGINAL_FAILURE")
+        self.assertIsNone(result["kvm_comparison"]); self.assertNotIn("PRIVATE", json.dumps(result))
+        self.life.cleanup_errors = ["DRAIN_UNCONFIRMED"]
+        result = self.finalize()
+        self.assertFalse(result["success"]); self.assertIn("DRAIN_UNCONFIRMED", result["cleanup_errors"])
+
+    def test_cancellation_during_capture_or_after_comparison_revokes_configuration_mode(self):
+        for moment in ("capture", "comparison"):
+            self.life.first_signal = None
+            state, evidence = self.state()
+            real = H.baseline_unchanged; config_calls = []
+            def capture():
+                if moment == "capture": self.life.first_signal = H.signal.SIGTERM
+                return self.after
+            def compare(*args, **kwargs):
+                result = real(*args, **kwargs)
+                if kwargs.get("kvm_configuration"):
+                    config_calls.append(True)
+                    if moment == "comparison": self.life.first_signal = H.signal.SIGTERM
+                return result
+            with patch.object(self.life, "drain_all"), patch.object(H, "baseline", side_effect=capture),                  patch.object(H, "baseline_unchanged", side_effect=compare):
+                with self.assertRaises(RuntimeError): H.finalize(state, evidence, self.before, True, None)
+            result = json.loads((evidence / "result.json").read_text())
+            self.assertFalse(result["success"]); self.assertFalse(result["host_configuration_checkpoint_accepted"])
+            self.assertEqual(result["baseline_acceptance_mode"], "STRICT_KVM_METADATA")
+            self.assertEqual(config_calls, [] if moment == "capture" else [True])
+
+
+    def child_phase(self, phase, observed, workload_error=None):
+        owner = SimpleNamespace(st_dev=1, st_ino=2, st_rdev=0, st_mode=stat.S_IFDIR | 0o700,
+            st_uid=1001, st_gid=1001, st_nlink=1, st_mtime_ns=3, st_ctime_ns=4)
+        receipt = SimpleNamespace(st_mode=stat.S_IFREG | 0o600, st_uid=1001, st_gid=1001, st_nlink=1, st_size=0)
+        state = unittest.mock.Mock(); state.lstat.return_value = owner; state.resolve.return_value = state
+        selected = [993] if phase in H.KVM_PHASES else []
+        creds = dict(uid=[1001]*3, gid=[1001]*3, groups=selected)
+        caps = dict(CapEff=0, CapPrm=0, CapAmb=0)
+        outer = dict(netns="net:[1]", credentials=self.before["credentials"], kvm=self.expected)
+        outer["credentials"] = dict(uid=[1001]*3, gid=[1001]*3, groups=[4,1001])
+        net = "net:[1]" if phase == "public-build" else "net:[2]"
+        writes = []
+        with ExitStack() as stack:
+            stack.enter_context(patch.dict(H.os.environ, dict(SUDO_UID="1001", SUDO_GID="1001")))
+            for name, value in (("getuid", 0), ("geteuid", 0), ("getpid", 1)):
+                stack.enter_context(patch.object(H.os, name, return_value=value))
+            stack.enter_context(patch.object(H.os, "open", side_effect=[22,23]))
+            stack.enter_context(patch.object(H.os, "fstat", side_effect=[owner,receipt]))
+            close = stack.enter_context(patch.object(H.os, "close"))
+            stack.enter_context(patch.object(H.os, "write", side_effect=lambda fd, raw: writes.append(raw) or len(raw)))
+            stack.enter_context(patch.object(H.os, "readlink", side_effect=lambda p: {"/proc/self/ns/net": net,
+                "/proc/self/ns/pid": "pid:[2]", "/proc/self": "1"}[p]))
+            stack.enter_context(patch.object(H.socket, "if_nameindex", return_value=[(1,"lo")]))
+            stack.enter_context(patch.object(H, "private_document", side_effect=[outer,
+                dict(map="a"*40,parent_pidns="pid:[1]"), dict(GITHUB_SHA="a"*40)]))
+            for name, value in (("drop_credentials", creds), ("capability_bits", caps), ("credentials", creds)):
+                stack.enter_context(patch.object(H, name, return_value=value))
+            for name in ("guards", "activate_environment", "acquire_build", "offline_build"):
+                stack.enter_context(patch.object(H, name))
+            snapshot = stack.enter_context(patch.object(H, "kvm_snapshot", side_effect=[self.expected, observed]))
+            query = stack.enter_context(patch.object(H, "kvm_open_query", return_value=dict(api_version=12, fd_closed=True, vm_created=False)))
+            stack.enter_context(patch.object(H, "emulator_trial", side_effect=workload_error))
+            stack.enter_context(patch.object(H.subprocess, "run"))
+            error = None
+            try: H.phase_child(state, phase)
+            except BaseException as caught: error = caught
+            self.assertEqual(close.call_args_list, [unittest.mock.call(23), unittest.mock.call(22)])
+            self.assertEqual(query.call_count, int(phase in H.KVM_PHASES))
+            self.assertEqual(snapshot.call_count, 1 if workload_error else 2)
+        self.assertEqual(len(writes), 1); self.assertLessEqual(len(writes[0]), 16384)
+        return json.loads(writes[0]), error
+
+    def test_emulator_final_checkpoint_accepts_only_timestamp_differences_and_retains_raw(self):
+        receipt, error = self.child_phase("emulator", self.after["kvm"])
+        self.assertIsNone(error); self.assertEqual(receipt["schema"], 2)
+        self.assertTrue(receipt["success"]); self.assertFalse(receipt["device_unchanged"])
+        self.assertTrue(receipt["device_configuration_unchanged"])
+        self.assertEqual(receipt["device_comparison"]["classification"], "TIMESTAMPS_ONLY")
+        self.assertEqual(receipt["device_checkpoint"], dict(before=self.expected, after=self.after["kvm"]))
+        for key in ("ino", "mode", "uid", "dev", "rdev", "nlink"):
+            changed = copy.deepcopy(self.after["kvm"]); changed["device"][key] += 1
+            receipt, error = self.child_phase("emulator", changed)
+            self.assertIsInstance(error, ValueError)
+            self.assertEqual(str(error), "KVM_METADATA_SHAPE" if key == "rdev" else "KVM_DEVICE_CHANGED")
+            self.assertFalse(receipt["success"]); self.assertFalse(receipt["device_configuration_unchanged"])
+
+    def test_quiet_phase_checkpoints_stay_strict_and_missing_workload_cannot_gain_comparison(self):
+        for phase in ("kvm-probe", "public-build", "offline-build"):
+            receipt, error = self.child_phase(phase, self.after["kvm"])
+            self.assertIsInstance(error, ValueError); self.assertEqual(str(error), "KVM_DEVICE_CHANGED")
+            self.assertFalse(receipt["success"]); self.assertFalse(receipt["device_unchanged"])
+            self.assertTrue(receipt["device_configuration_unchanged"])
+            receipt, error = self.child_phase(phase, self.expected)
+            self.assertIsNone(error); self.assertTrue(receipt["success"] and receipt["device_unchanged"])
+        original = ValueError("ACTUAL_INSTRUMENTATION_RESULT")
+        receipt, error = self.child_phase("emulator", self.after["kvm"], original)
+        self.assertIs(error, original); self.assertFalse(receipt["success"])
+        self.assertFalse(receipt["device_unchanged"] or receipt["device_configuration_unchanged"])
+        self.assertIsNone(receipt["device_checkpoint"]); self.assertIsNone(receipt["device_comparison"])
+
+    def parent_receipt(self, phase, observed):
+        comparison = H.kvm_comparison(self.expected, observed)
+        return dict(schema=2, kind="hosted-phase", phase=phase, source="a"*40, success=True,
+            credentials=dict(uid=[1001]*3,gid=[1001]*3,groups=[993] if phase in H.KVM_PHASES else []),
+            capabilities=dict(CapEff=0,CapPrm=0,CapAmb=0),
+            probe=dict(api_version=12,fd_closed=True,vm_created=False) if phase in H.KVM_PHASES else None,
+            device_unchanged=comparison["raw_unchanged"], device_configuration_unchanged=comparison["configuration_unchanged"],
+            device_comparison=comparison, device_checkpoint=dict(before=copy.deepcopy(self.expected),after=copy.deepcopy(observed)))
+
+    def parent_phase(self, phase, receipt):
+        state, _ = self.state()
+        with patch.object(H, "run") as run, patch.object(H, "private_document", side_effect=[receipt,self.before]):
+            H.run_phase(state, phase, dict(GITHUB_SHA="a"*40), 10)
+            run.assert_called_once()
+
+    def test_parent_recomputes_source_bound_checkpoint_and_quiet_phase_rejection(self):
+        self.parent_phase("emulator", self.parent_receipt("emulator", self.after["kvm"]))
+        for phase in H.PHASES:
+            self.parent_phase(phase, self.parent_receipt(phase, self.expected))
+            if phase != "emulator":
+                with self.assertRaisesRegex(ValueError, "PHASE_RECEIPT_CONTRACT"):
+                    self.parent_phase(phase, self.parent_receipt(phase, self.after["kvm"]))
+        for mode in ("origin", "after", "before_extra", "after_missing", "classification", "extra_comparison", "raw_int", "config_int", "recorded_raw_int", "recorded_config_int", "missing", "old_schema", "schema_float"):
+            receipt = self.parent_receipt("emulator", self.after["kvm"])
+            if mode == "origin": receipt["device_checkpoint"]["before"]["device"]["mtime_ns"] += 1
+            elif mode == "after": receipt["device_checkpoint"]["after"]["device"]["mode"] += 1
+            elif mode == "before_extra": receipt["device_checkpoint"]["before"]["extra"] = 1
+            elif mode == "after_missing": receipt["device_checkpoint"]["after"]["device"].pop("ctime_ns")
+            elif mode == "classification": receipt["device_comparison"]["classification"] = "UNCHANGED"
+            elif mode == "extra_comparison": receipt["device_comparison"]["extra"] = 1
+            elif mode == "raw_int": receipt["device_unchanged"] = 0
+            elif mode == "config_int": receipt["device_configuration_unchanged"] = 1
+            elif mode == "recorded_raw_int": receipt["device_comparison"]["raw_unchanged"] = 0
+            elif mode == "recorded_config_int": receipt["device_comparison"]["configuration_unchanged"] = 1
+            elif mode == "missing": receipt.pop("device_checkpoint")
+            elif mode == "old_schema": receipt["schema"] = 1
+            elif mode == "schema_float": receipt["schema"] = 2.0
+            with self.subTest(mode=mode), self.assertRaises(ValueError): self.parent_phase("emulator", receipt)
+
+    def test_configuration_callsite_gate_keeps_controls_strict_and_no_other_mode_authority(self):
+        source = (P.HERE / "hosted.py").read_text()
+        S.kvm_configuration_bindings(ast.parse(source))
+        marker = 'unchanged = baseline_unchanged(before, after)'
+        mutations = (source.replace(marker, marker[:-1] + ', kvm_configuration=True)'),
+            source.replace('kvm_configuration=True) if configuration_mode', 'kvm_configuration=1) if configuration_mode'),
+            source.replace('kvm_configuration=True) if configuration_mode', 'unknown_mode=True) if configuration_mode'),
+            source + '\ndef extra():\n    baseline_unchanged(before, after, kvm_configuration=True)\n')
+        for mutation in mutations:
+            with self.assertRaises(ValueError): S.kvm_configuration_bindings(ast.parse(mutation))
 
 
 class KvmShimTests(unittest.TestCase):

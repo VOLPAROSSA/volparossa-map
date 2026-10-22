@@ -121,6 +121,33 @@ def kvm_snapshot():
     return result
 
 
+def kvm_comparison(before, after):
+    """Closed checkpoint comparison; raw snapshots are never rewritten."""
+    device_fields = {"dev", "ino", "rdev", "mode", "uid", "gid", "nlink", "mtime_ns", "ctime_ns"}
+    for value in (before, after):
+        require(type(value) is dict and set(value) == {"device", "acl", "kvm_gid"}, "KVM_METADATA_SHAPE")
+        device, acl = value["device"], value["acl"]
+        require(type(device) is dict and set(device) == device_fields, "KVM_METADATA_SHAPE")
+        require(all(type(device[key]) is int and 0 <= device[key] < 2**64 for key in device_fields - {"mtime_ns", "ctime_ns"})
+                and all(type(device[key]) is int and -2**63 <= device[key] < 2**64 for key in ("mtime_ns", "ctime_ns")),
+                "KVM_METADATA_SHAPE")
+        require(device["mode"] < 2**16 and stat.S_ISCHR(device["mode"])
+                and (os.major(device["rdev"]), os.minor(device["rdev"])) == (10, 232)
+                and device["uid"] < 2**32 and device["gid"] < 2**32 and device["nlink"] > 0,
+                "KVM_METADATA_SHAPE")
+        require(type(value["kvm_gid"]) is int and 0 < value["kvm_gid"] < 2**32
+                and value["kvm_gid"] == device["gid"], "KVM_METADATA_SHAPE")
+        require(type(acl) is dict and ((set(acl) == {"present"} and acl["present"] is False) or
+                (set(acl) == {"present", "bytes", "sha256"} and acl["present"] is True
+                 and type(acl["bytes"]) is int and 0 <= acl["bytes"] <= 4096
+                 and type(acl["sha256"]) is str and re.fullmatch("[0-9a-f]{64}", acl["sha256"]))), "KVM_METADATA_SHAPE")
+    raw_unchanged = before == after
+    configuration_unchanged = (before["acl"] == after["acl"] and before["kvm_gid"] == after["kvm_gid"]
+        and all(before["device"][key] == after["device"][key] for key in device_fields - {"mtime_ns", "ctime_ns"}))
+    return dict(classification="UNCHANGED" if raw_unchanged else "TIMESTAMPS_ONLY" if configuration_unchanged
+                else "CONFIGURATION_DIFFERENCE", raw_unchanged=raw_unchanged, configuration_unchanged=configuration_unchanged)
+
+
 def kvm_admission(state):
     """Metadata receipt exists even if the fixed device/group cannot be used."""
     result = dict(schema=1, kind="kvm-metadata-only", success=False,
@@ -576,14 +603,28 @@ def firewall_comparison(before, after):
                 config_changed=config_changed, counters_changed=counters_changed)
 
 
-def baseline_unchanged(before, after):
+def baseline_unchanged(before, after, *, kvm_configuration=False):
+    require(type(kvm_configuration) is bool, "KVM_COMPARISON_MODE")
+    comparison = None
+    if type(before) is dict and type(after) is dict and ("kvm" in before or "kvm" in after):
+        require("kvm" in before and "kvm" in after, "KVM_METADATA_SHAPE")
+        comparison = kvm_comparison(before["kvm"], after["kvm"])
+    if kvm_configuration:
+        components = {"netns", "routes", "ipv6_routes", "resolver", "firewall", "credentials", "kvm"}
+        require(type(before) is dict and type(after) is dict and set(before) == set(after) == components,
+                "KVM_CONFIGURATION_BASELINE_SHAPE")
+        diagnostic = baseline_diagnostic(before, after, None)
+        require(diagnostic["diagnostic_error"] is None and diagnostic["before"] is not None
+                and diagnostic["after"] is not None, "KVM_CONFIGURATION_BASELINE_SHAPE")
     if before == after:
         if type(before) is dict and "firewall" in before:
             firewall_comparison(before["firewall"], after["firewall"])
         return True
+    ignored = {"firewall", "kvm"} if kvm_configuration else {"firewall"}
     return (type(before) is dict and type(after) is dict and set(before) == set(after) and "firewall" in before
-            and {key: value for key, value in before.items() if key != "firewall"}
-                == {key: value for key, value in after.items() if key != "firewall"}
+            and {key: value for key, value in before.items() if key not in ignored}
+                == {key: value for key, value in after.items() if key not in ignored}
+            and (not kvm_configuration or comparison["configuration_unchanged"])
             and not firewall_comparison(before["firewall"], after["firewall"])["config_changed"])
 
 
@@ -1185,8 +1226,9 @@ def phase_child(state, phase):
             "PHASE_OWNED_STATE")
     require(os.environ.get("SUDO_UID") == str(owner.st_uid) and os.environ.get("SUDO_GID") == str(owner.st_gid),
             "PHASE_SUDO_OWNER")
-    result = dict(schema=1, kind="hosted-phase", phase=phase, source=None, success=False,
-                  credentials=None, capabilities=None, probe=None, device_unchanged=False)
+    result = dict(schema=2, kind="hosted-phase", phase=phase, source=None, success=False,
+                  credentials=None, capabilities=None, probe=None, device_unchanged=False,
+                  device_configuration_unchanged=False, device_comparison=None, device_checkpoint=None)
     directory_fd, receipt_fd, writable, original = None, None, False, None
     try:
         # Bind a non-symlink owned directory before privileged file access.
@@ -1232,8 +1274,13 @@ def phase_child(state, phase):
         elif phase == "emulator":
             emulator_trial(state, env)
         require(credentials() == result["credentials"] and capability_bits() == result["capabilities"], "PHASE_CREDENTIAL_CHANGED")
-        require(kvm_snapshot() == expected, "KVM_DEVICE_CHANGED")
-        result.update(success=True, device_unchanged=True)
+        observed = kvm_snapshot()
+        comparison = kvm_comparison(expected, observed)
+        result.update(device_unchanged=comparison["raw_unchanged"],
+            device_configuration_unchanged=comparison["configuration_unchanged"], device_comparison=comparison,
+            device_checkpoint=dict(before=expected, after=observed))
+        require(comparison["raw_unchanged"] or (phase == "emulator" and comparison["configuration_unchanged"]), "KVM_DEVICE_CHANGED")
+        result["success"] = True
     except BaseException as error:
         original = error
         result.update(code=failure_code(error), errno=getattr(error, "errno", None))
@@ -1299,9 +1346,18 @@ def run_phase(state, phase, env, seconds):
             except BaseException:
                 if original is None: raise
     selected = [outer["kvm"]["kvm_gid"]] if phase in KVM_PHASES else []
-    require(receipt["schema"] == 1 and receipt["kind"] == "hosted-phase" and receipt["phase"] == phase
+    checkpoint = receipt.get("device_checkpoint")
+    require(type(checkpoint) is dict and set(checkpoint) == {"before", "after"}, "PHASE_KVM_CHECKPOINT")
+    require(kvm_comparison(outer["kvm"], checkpoint["before"])["raw_unchanged"], "PHASE_KVM_CHECKPOINT_ORIGIN")
+    comparison = kvm_comparison(outer["kvm"], checkpoint["after"])
+    recorded = receipt.get("device_comparison")
+    require(type(recorded) is dict and set(recorded) == set(comparison)
+            and type(recorded["raw_unchanged"]) is bool and type(recorded["configuration_unchanged"]) is bool
+            and recorded == comparison and receipt.get("device_unchanged") is comparison["raw_unchanged"]
+            and receipt.get("device_configuration_unchanged") is comparison["configuration_unchanged"], "PHASE_KVM_CHECKPOINT")
+    require(type(receipt["schema"]) is int and receipt["schema"] == 2 and receipt["kind"] == "hosted-phase" and receipt["phase"] == phase
             and receipt["source"] == env["GITHUB_SHA"] and receipt["success"] is True
-            and receipt["device_unchanged"] is True
+            and (comparison["raw_unchanged"] or (phase == "emulator" and comparison["configuration_unchanged"]))
             and receipt["credentials"] == dict(uid=outer["credentials"]["uid"], gid=outer["credentials"]["gid"], groups=selected)
             and receipt["capabilities"] == dict(CapEff=0, CapPrm=0, CapAmb=0), "PHASE_RECEIPT_CONTRACT")
     require(receipt["probe"] == (dict(api_version=12, fd_closed=True, vm_created=False) if phase in KVM_PHASES else None),
@@ -1370,8 +1426,10 @@ def baseline_diagnostic(before, after, capture_error):
 def finalize(state, evidence, before, complete, original, control_mode=None):
     """Best-effort bounded finalization; original failure always keeps precedence."""
     errors, removed, unchanged, drained = [], False, None, False
+    configuration_accepted, kvm_checkpoint = None, None
+    configuration_mode = False
     after, capture_error = None, "BASELINE_NOT_CAPTURED"
-    result = dict(schema=2, source=os.environ.get("GITHUB_SHA"), success=False,
+    result = dict(schema=3, source=os.environ.get("GITHUB_SHA"), success=False,
                   primary_failure=failure_code(original), synthetic_only=True, hardware_acceptance=False)
     try:
         with ACTIVE.cleanup():
@@ -1386,14 +1444,18 @@ def finalize(state, evidence, before, complete, original, control_mode=None):
             drained = not ACTIVE.owned
             try:
                 if before is None:
-                    unchanged, capture_error = False, "BASELINE_BEFORE_UNAVAILABLE"
+                    unchanged, configuration_accepted, capture_error = False, False, "BASELINE_BEFORE_UNAVAILABLE"
                 else:
                     after = baseline()
                     unchanged, capture_error = baseline_unchanged(before, after), None
+                    configuration_mode = complete is True and original is None and control_mode is None and ACTIVE.first_signal is None
+                    configuration_accepted = baseline_unchanged(before, after, kvm_configuration=True) if configuration_mode else unchanged
+                    if type(before) is dict and type(after) is dict and "kvm" in before and "kvm" in after:
+                        kvm_checkpoint = kvm_comparison(before["kvm"], after["kvm"])
             except BaseException as error:
-                errors.append(failure_code(error)); unchanged = False
+                errors.append(failure_code(error)); unchanged, configuration_accepted = False, False
                 capture_error = "BASELINE_CAPTURE_FAILED"
-            if not unchanged:
+            if not configuration_accepted:
                 errors.append("HOST_BASELINE_UNCONFIRMED")
             for path in state.glob("*.json"):
                 if path.name != "environment.json":
@@ -1415,10 +1477,18 @@ def finalize(state, evidence, before, complete, original, control_mode=None):
     finally:
         # Tiny fixed receipts remain best effort after a cleanup deadline. A hard
         # kill, blocked filesystem or runner destruction can prevent even these.
-        result.update(host_routes_dns_firewall_unchanged=unchanged, registered_groups_drained=drained,
+        # A deferred cleanup signal revokes the configuration-only criterion too.
+        if ACTIVE.first_signal is not None:
+            configuration_mode, configuration_accepted = False, unchanged
+            if unchanged is False and "HOST_BASELINE_UNCONFIRMED" not in errors:
+                errors.append("HOST_BASELINE_UNCONFIRMED")
+        result.update(host_routes_dns_firewall_unchanged=unchanged,
+            host_configuration_checkpoint_accepted=configuration_accepted,
+            baseline_acceptance_mode="COMPLETED_EMULATOR_CONFIGURATION" if configuration_mode else "STRICT_KVM_METADATA",
+            kvm_comparison=kvm_checkpoint, registered_groups_drained=drained,
             owned_state_removed=removed, completed_workload=complete, first_signal=ACTIVE.first_signal,
             signal_count=ACTIVE.signal_count, cleanup_errors=ACTIVE.cleanup_errors + errors,
-            success=complete and unchanged is True and drained and removed and not errors
+            success=complete is True and original is None and configuration_accepted is True and drained and removed and not errors
                     and not ACTIVE.cleanup_errors and ACTIVE.first_signal is None)
         try:
             result["baseline_comparison"] = baseline_diagnostic(before, after, capture_error)

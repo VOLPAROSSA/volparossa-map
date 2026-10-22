@@ -1102,3 +1102,99 @@ predicate, parser bounds, receipt fields/retention, deadlines, cleanup, signals,
 KVM checks, baselines, workflow and JNI/Activity/controller sources are unchanged.
 The correction removes the known inherited permission at source. It does not
 establish the historical cause or prove final merged-APK or runtime success.
+
+
+### Completed-emulator KVM configuration checkpoint candidate
+
+This full-fixture candidate starts from Map
+`f3296c21f9787cb760e561954652158c7b21601d`, tree
+`0002fa35860355a41541aa4563870909b03e7a5e`; it is separate from the control-only
+branch. The principal and independent reviewer audited minimal hosted control
+`39696546767`: the unchanged API12 query negative stayed unchanged, exactly one
+empty VM creation/close produced only KVM ctime/mtime differences, all owned FDs
+closed, groups drained and private state was removed. Its original strict overall
+verdict remained failure. The retained control artifact has SHA-256
+`d7c6dee986c0673f8531bd353d33e08a4437913356c9211c12ccb8f8a331581a`.
+No Android workload ran in that control. Separately, full actual `39694570310` on
+`f3296c21` passed all eight Android tests and inner/outer process/state cleanup,
+but failed the strict KVM timestamp comparison; IPv6 matched and firewall changes
+were counters-only. These historical verdicts remain failures under their tested
+contracts and are not relabeled by this source change.
+
+The principal's current contract distinguishes active host configuration from
+operational timestamps at **completed-emulator checkpoints only**. A new pure
+`kvm_comparison` validates both complete snapshots before equality or projection:
+exact device/ACL/group key sets, integer types excluding bool/float, bounded
+numeric values, full 16-bit mode describing a character device, major/minor
+10/232, UID/GID within 32 bits, positive link count, and a nonzero named KVM group
+matching device GID. ACL presence must be a bool; a present ACL has only its
+bounded byte count and lowercase SHA-256 digest. Missing, unreadable, mistyped,
+unknown or semantically wrong-device input fails closed. The matcher returns
+`UNCHANGED`, `TIMESTAMPS_ONLY` or `CONFIGURATION_DIFFERENCE`, plus separate raw
+and configuration equality booleans. Configuration comparison retains exact
+`dev`, `ino`, `rdev`, full mode, UID, GID, link count, ACL presence/digest/size and
+named group GID. Only mtime_ns and ctime_ns are excluded from that comparison;
+neither raw snapshot is rewritten, dropped or adopted as a new baseline.
+
+Phase receipts are now schema **2**. `device_unchanged` retains its original raw
+metadata-equality meaning. New `device_configuration_unchanged`,
+`device_comparison` and `device_checkpoint` fields describe the independent
+configuration result and preserve the raw before/after snapshots. Null checkpoint
+and comparison fields mean the final comparison was not reached. Initial lstat,
+no-follow open and opened-FD identity checks remain exact. The API12 probe remains
+query-only, closes its FD and uses exact metadata comparisons. The kvm-probe,
+public-build and offline-build final checks remain strict, including timestamps.
+Only after `emulator_trial` returns normally through its unchanged eight-test and
+inner-cleanup acceptance path can the emulator's final check accept
+`TIMESTAMPS_ONLY`; `device_unchanged` then remains false while
+`device_configuration_unchanged` is true. The parent recomputes the comparison
+against the original source-bound baseline, checks the raw origin snapshot and
+both typed booleans/classification, and independently enforces the same phase
+policy. Child-reported success or configuration equality alone is insufficient.
+
+Outer finalizer receipts are schema **3**. The existing
+`host_routes_dns_firewall_unchanged` retains its strict KVM-metadata criterion and
+existing firewall comparison policy; it can remain false on a successful new
+receipt. New `baseline_acceptance_mode`,
+`host_configuration_checkpoint_accepted` and `kvm_comparison` make the selected
+criterion explicit. The default baseline predicate remains strict. Its sole
+configuration-mode call is in the finalizer, only when `complete is True`, no
+original failure/control mode exists and no cancellation has been recorded.
+`main` sets that complete flag only after all phases, including the emulator,
+finish successfully. Deferred cancellation during capture or comparison revokes
+the criterion and restores the strict verdict. Cancellation and reaping controls
+continue to call the strict predicate; incomplete instrumentation or workload
+failures cannot select configuration mode. Configuration-mode baseline comparison
+requires the complete validated existing baseline schema, preserves exact checks
+for every non-KVM component and retains the existing firewall configuration
+policy. All raw before/after metadata and changed-component evidence remain in
+the existing bounded diagnostic. Overall success still requires the full workload,
+accepted host checkpoint, drained groups, removed state and no cleanup errors or
+cancellation. Receipt bounds, error precedence and cleanup budgets are unchanged.
+
+The measured limitation is explicit: matching configuration at these checkpoints
+cannot exclude a transient permission/ACL change followed by restoration. The
+ctime/mtime alarm for that possibility is removed only from the completed-emulator
+criterion. Strict quiet controls retain it. Empty-VM reproduction does not identify
+the actor, bind the actual kernel/udev builds, establish the kernel-to-udev syscall
+chain or explain an older run. The immutable Linux/systemd source references and
+licenses above remain a mechanism hypothesis; no upstream code is imported.
+No event listener, tracing, device/configuration write, SDK permission or runtime
+authority is added by this comparison change.
+
+The inert inventory is **93 existing + 12 new = 105**. The new tests cover raw
+preservation and strict versus configuration replay, every authority/ACL/group
+field with and without timestamp differences, malformed identical inputs and
+bool/int traps, other baseline components/firewall policy, schema2 parent
+recomputation and quiet-phase rejection, schema3 mode selection, capture/cleanup
+and incomplete-instrumentation failures, cancellation during capture/comparison,
+and the explicit configuration call-site allowlist. Of 93 existing test methods,
+92 retain identical ASTs. The existing matching-malformed-KVM test now requires
+closed failure rather than accepting two identically invalid snapshots; its
+privacy/diagnostic assertions remain. Main, device_identity, query-only negative,
+initial device/FD checks, lifecycle, cancellation/reaping controls, firewall
+policy, eight Java methods/acceptance guard, pins and workflow are unchanged.
+These are inert source/mocked observations only. Independent review and a new
+exact-source full hosted trial remain necessary; this candidate has no actual
+Android/KVM acceptance yet and supplies no sensor, main navigation, physical
+positioning or private protected-execution claim.

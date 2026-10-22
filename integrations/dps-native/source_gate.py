@@ -28,6 +28,24 @@ def manifest_boundary(source, module):
             require(activity.get(ns + "exported") == "false", "NONEXPORTED_FIXTURE")
 
 
+def kvm_configuration_bindings(parsed):
+    calls = []
+    for function in parsed.body:
+        if not isinstance(function, ast.FunctionDef): continue
+        for node in ast.walk(function):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "baseline_unchanged":
+                require(len(node.args) == 2 and not any(isinstance(arg, ast.Starred) for arg in node.args),
+                        "KVM_BASELINE_CALL_CONTRACT")
+                if node.keywords:
+                    require(function.name == "finalize" and len(node.keywords) == 1
+                            and node.keywords[0].arg == "kvm_configuration"
+                            and isinstance(node.keywords[0].value, ast.Constant) and node.keywords[0].value.value is True,
+                            "KVM_CONFIGURATION_COMPLETED_FINALIZER_ONLY")
+                calls.append((function.name, bool(node.keywords)))
+    require(sorted(calls) == [("finalize", False), ("finalize", True), ("group_reaping_control", False)],
+            "KVM_BASELINE_CALL_INVENTORY")
+
+
 def main():
     locked = pins()
     upstream = json.loads((HERE.parents[1] / "upstream.lock.json").read_text())
@@ -58,6 +76,7 @@ def main():
     hosted = (HERE / "hosted.py").read_text()
     require(len(re.findall(r"@Test public void ", tests)) == 8 and "OK (8 tests)" in hosted, "INSTRUMENTATION_INVENTORY")
     parsed = ast.parse(hosted)
+    kvm_configuration_bindings(parsed)
     constants = {node.targets[0].id: ast.literal_eval(node.value) for node in parsed.body
                  if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
                  and node.targets[0].id in ("PHASES", "KVM_PHASES", "KVM_GET_API_VERSION")}

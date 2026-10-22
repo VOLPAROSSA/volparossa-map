@@ -29,6 +29,11 @@ def inert_ipv6_route(**changes):
         "gateway", "metric", "reference", "use", "flags")) + " " + fields["device"].rjust(8) + "\n").encode()
 
 
+def inert_ipv6_renderer():
+    return dict(schema=1, profile=H.IPV6_ROUTE_RENDERER_PROFILE,
+        kernel=dict(sysname="Linux", release="6.8.0-1001-azure", version="#1-Ubuntu SMP inert", machine="x86_64"))
+
+
 class PreparationTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -374,7 +379,8 @@ class FirewallSnapshotTests(unittest.TestCase):
                          lambda x: x["raw"].update(sha256="raw policy")):
             malformed = copy.deepcopy(valid); mutation(malformed)
             ipv6 = H.ipv6_route_snapshot(inert_ipv6_route())
-            baseline = dict(firewall=malformed, ipv6_routes=ipv6["raw"], ipv6_route_metadata=ipv6["metadata"])
+            baseline = dict(firewall=malformed, ipv6_routes=ipv6["raw"], ipv6_route_metadata=ipv6["metadata"],
+                            ipv6_renderer=inert_ipv6_renderer())
             with self.assertRaisesRegex(ValueError, "FIREWALL_METADATA_SHAPE"):
                 H.baseline_unchanged(baseline, copy.deepcopy(baseline))
 
@@ -414,6 +420,7 @@ class FirewallSnapshotTests(unittest.TestCase):
         with patch.object(H.subprocess, "check_output", return_value=raw) as command, \
              patch.object(H.Path, "read_bytes", return_value=b"inert"), \
              patch.object(H, "read_ipv6_route_snapshot", return_value=H.ipv6_route_snapshot(inert_ipv6_route())), \
+             patch.object(H, "ipv6_renderer_snapshot", return_value=inert_ipv6_renderer()), \
              patch.object(H.os, "readlink", return_value="net:[123]"), \
              patch.object(H, "credentials", return_value={}), patch.object(H, "kvm_snapshot", return_value={}):
             snapshot = H.baseline()
@@ -432,7 +439,8 @@ class BaselineDiagnosticShimTests(unittest.TestCase):
         self.enterContext(patch.object(H.signal, "getitimer", return_value=(0.0, 0.0)))
         self.before = dict(netns="net:[123]", routes=dict(bytes=896, sha256="a" * 64),
             ipv6_routes=H.ipv6_route_snapshot(inert_ipv6_route())["raw"],
-            ipv6_route_metadata=H.ipv6_route_snapshot(inert_ipv6_route())["metadata"], resolver=dict(bytes=970, sha256="a" * 64),
+            ipv6_route_metadata=H.ipv6_route_snapshot(inert_ipv6_route())["metadata"], ipv6_renderer=inert_ipv6_renderer(),
+            resolver=dict(bytes=970, sha256="a" * 64),
             firewall=H.firewall_snapshot(json.dumps(inert_firewall()).encode()),
             credentials=dict(uid=[1001] * 3, gid=[1001] * 3, groups=[4, 1001]),
             kvm=dict(kvm_gid=993, acl=dict(present=False), device=dict(dev=6, ino=435, rdev=2792,
@@ -463,6 +471,7 @@ class BaselineDiagnosticShimTests(unittest.TestCase):
                 if component == "netns": after[component] = "net:[124]"
                 elif component == "credentials": after[component]["groups"] = [1001]
                 elif component == "kvm": after[component]["device"]["ctime_ns"] += 1
+                elif component == "ipv6_renderer": after[component]["kernel"]["version"] = "#2-Ubuntu SMP inert"
                 elif component == "firewall":
                     document = inert_firewall(); document["nftables"][2]["chain"]["policy"] = "accept"
                     after[component] = H.firewall_snapshot(json.dumps(document).encode())
@@ -1388,7 +1397,8 @@ class KvmConfigurationTests(unittest.TestCase):
         self.enterContext(patch.object(H.signal, "getitimer", return_value=(0.0, 0.0)))
         self.before = dict(netns="net:[123]", routes=dict(bytes=896, sha256="a"*64),
             ipv6_routes=H.ipv6_route_snapshot(inert_ipv6_route())["raw"],
-            ipv6_route_metadata=H.ipv6_route_snapshot(inert_ipv6_route())["metadata"], resolver=dict(bytes=970, sha256="a"*64),
+            ipv6_route_metadata=H.ipv6_route_snapshot(inert_ipv6_route())["metadata"], ipv6_renderer=inert_ipv6_renderer(),
+            resolver=dict(bytes=970, sha256="a"*64),
             firewall=H.firewall_snapshot(json.dumps(inert_firewall()).encode()),
             credentials=dict(uid=[1001]*3, gid=[1001]*3, groups=[4,1001]),
             kvm=dict(kvm_gid=993, acl=dict(present=False), device=dict(dev=6, ino=435, rdev=2792,
@@ -1529,10 +1539,13 @@ class KvmConfigurationTests(unittest.TestCase):
         self.assertFalse(result["success"]); self.assertIn("DRAIN_UNCONFIRMED", result["cleanup_errors"])
 
     def test_cancellation_during_capture_or_after_comparison_revokes_configuration_mode(self):
-        for moment in ("capture", "comparison"):
+        reference = H.ipv6_route_snapshot(inert_ipv6_route(reference="00000002"))
+        self.after.update(ipv6_routes=reference["raw"], ipv6_route_metadata=reference["metadata"])
+        for moment in ("capture", "comparison", "diagnostic"):
             self.life.first_signal = None
             state, evidence = self.state()
             real = H.baseline_unchanged; config_calls = []
+            diagnostic_real = H.baseline_diagnostic; diagnostic_calls = []
             def capture():
                 if moment == "capture": self.life.first_signal = H.signal.SIGTERM
                 return self.after
@@ -1542,12 +1555,19 @@ class KvmConfigurationTests(unittest.TestCase):
                     config_calls.append(True)
                     if moment == "comparison": self.life.first_signal = H.signal.SIGTERM
                 return result
-            with patch.object(self.life, "drain_all"), patch.object(H, "baseline", side_effect=capture),                  patch.object(H, "baseline_unchanged", side_effect=compare):
+            def diagnostic(*args):
+                result = diagnostic_real(*args); diagnostic_calls.append(True)
+                if moment == "diagnostic" and len(diagnostic_calls) == 2:
+                    self.life.first_signal = H.signal.SIGTERM
+                return result
+            with patch.object(self.life, "drain_all"), patch.object(H, "baseline", side_effect=capture), \
+                 patch.object(H, "baseline_unchanged", side_effect=compare), patch.object(H, "baseline_diagnostic", side_effect=diagnostic):
                 with self.assertRaises(RuntimeError): H.finalize(state, evidence, self.before, True, None)
             result = json.loads((evidence / "result.json").read_text())
             self.assertFalse(result["success"]); self.assertFalse(result["host_configuration_checkpoint_accepted"])
             self.assertEqual(result["baseline_acceptance_mode"], "STRICT_KVM_METADATA")
             self.assertEqual(config_calls, [] if moment == "capture" else [True])
+            self.assertEqual(result["baseline_comparison"]["ipv6_route_comparison"]["classification"], "REFERENCE_METADATA_ONLY")
 
 
     def child_phase(self, phase, observed, workload_error=None):
@@ -1939,10 +1959,12 @@ class KvmShimTests(unittest.TestCase):
     def test_outer_orchestration_probes_before_acquisition_and_separates_builds(self):
         env = dict(RUNNER_TEMP=str(self.root), GITHUB_RUN_ID="1", GITHUB_RUN_ATTEMPT="1", GITHUB_SHA="a"*40)
         observed = []
-        before = dict(kvm=self.expected)
+        before = dict(kvm=self.expected, ipv6_routes=H.ipv6_route_snapshot(inert_ipv6_route())["raw"],
+            ipv6_route_metadata=H.ipv6_route_snapshot(inert_ipv6_route())["metadata"])
         with patch.dict(H.os.environ, env, clear=True), patch.object(H.sys, "argv", ["hosted.py", "--reviewed-hosted-fixture"]), \
              patch.object(H, "guards"), patch.object(H, "environment", return_value=env), \
              patch.object(H, "kvm_admission", return_value=self.expected), patch.object(H, "baseline", return_value=before), \
+             patch.object(H, "ipv6_renderer_admission", return_value=inert_ipv6_renderer()), \
              patch.object(H, "run_phase", side_effect=lambda state, phase, *_: observed.append(phase)), \
              patch.object(H, "cancellation_control", side_effect=lambda *_: observed.append("cancellation")), \
              patch.object(H, "group_reaping_control", side_effect=lambda *_: observed.append("group-reaping")), \
@@ -1970,6 +1992,7 @@ class Ipv6RouteDiagnosticTests(unittest.TestCase):
         self.assertNotIn(raw[:32].decode(), json.dumps([before, after]))
 
     def test_every_other_field_order_and_multiplicity_remain_configuration_differences(self):
+        KvmConfigurationTests.setUp(self)
         raw = inert_ipv6_route()
         before = H.ipv6_route_snapshot(raw)
         changes = dict(destination="20010db8000000000000000000000001", destination_prefix="41",
@@ -1984,11 +2007,17 @@ class Ipv6RouteDiagnosticTests(unittest.TestCase):
                 self.assertEqual(result["classification"], "NON_REFCOUNT_DIFFERENCE")
                 self.assertTrue(result["non_refcount_changed"])
                 self.assertFalse(result["reference_metadata_changed"])
+                changed = dict(self.before, ipv6_routes=after["raw"], ipv6_route_metadata=after["metadata"])
+                self.assertFalse(H.baseline_unchanged(self.before, changed, kvm_configuration=True))
         other = inert_ipv6_route(metric="00000002")
         for left, right in ((raw + other, other + raw), (raw, raw + raw), (raw + raw, raw)):
             result = H.ipv6_route_comparison(H.ipv6_route_snapshot(left), H.ipv6_route_snapshot(right))
             self.assertEqual(result["classification"], "NON_REFCOUNT_DIFFERENCE")
             self.assertTrue(result["non_refcount_changed"])
+            before_rows, after_rows = H.ipv6_route_snapshot(left), H.ipv6_route_snapshot(right)
+            first = dict(self.before, ipv6_routes=before_rows["raw"], ipv6_route_metadata=before_rows["metadata"])
+            last = dict(self.before, ipv6_routes=after_rows["raw"], ipv6_route_metadata=after_rows["metadata"])
+            self.assertFalse(H.baseline_unchanged(first, last, kvm_configuration=True))
 
     def test_empty_and_duplicate_rows_are_valid_without_sorting_or_deduplication(self):
         empty = H.ipv6_route_snapshot(b"")
@@ -2080,7 +2109,7 @@ class Ipv6RouteDiagnosticTests(unittest.TestCase):
             opened.return_value.__enter__.return_value.read.return_value = b"x" * (H.IPV6_ROUTE_BYTES + 1)
             with self.assertRaisesRegex(ValueError, "^IPV6_ROUTE_BYTES$"): H.read_ipv6_route_snapshot()
 
-    def test_all_baseline_modes_reject_reference_only_and_rejected_identical_rows(self):
+    def test_only_completed_configuration_accepts_reference_only_and_all_reject_bad_layout(self):
         # Reuse only inert setup/finalizer helpers, without inheriting test methods.
         KvmConfigurationTests.setUp(self)
         self.state = lambda: KvmConfigurationTests.state(self)
@@ -2092,17 +2121,19 @@ class Ipv6RouteDiagnosticTests(unittest.TestCase):
             observed = ref if case == "reference" else rejected
             after.update(ipv6_routes=observed["raw"], ipv6_route_metadata=observed["metadata"])
             for configuration in (False, True):
-                self.assertFalse(H.baseline_unchanged(before, after, kvm_configuration=configuration))
+                self.assertEqual(H.baseline_unchanged(before, after, kvm_configuration=configuration),
+                                 case == "reference" and configuration)
             for mode in ("normal", "quiet", "cancel", "incomplete", "completed", "failed"):
                 self.life.first_signal = H.signal.SIGTERM if mode == "cancel" else None
                 result = KvmConfigurationTests.finalize(self, before=before, after=after,
                     complete=mode not in ("normal", "incomplete"),
                     original=ValueError("ORIGINAL_FAILURE") if mode == "failed" else None,
                     control_mode="quiet" if mode == "quiet" else None)
-                self.assertFalse(result["success"], (case, mode))
+                accepted = case == "reference" and mode == "completed"
+                self.assertEqual(result["success"], accepted, (case, mode))
                 self.assertFalse(result["host_routes_dns_firewall_unchanged"])
-                self.assertFalse(result["host_configuration_checkpoint_accepted"])
-                self.assertIn("HOST_BASELINE_UNCONFIRMED", result["cleanup_errors"])
+                self.assertEqual(result["host_configuration_checkpoint_accepted"], accepted)
+                self.assertEqual("HOST_BASELINE_UNCONFIRMED" in result["cleanup_errors"], not accepted)
                 diagnostic = result["baseline_comparison"]
                 self.assertEqual(diagnostic["before"], before); self.assertEqual(diagnostic["after"], after)
                 self.assertEqual(diagnostic["ipv6_route_comparison"]["classification"],
@@ -2144,14 +2175,244 @@ class Ipv6RouteDiagnosticTests(unittest.TestCase):
             self.assertTrue(result["registered_groups_drained"] and result["owned_state_removed"])
             if mode == "failed": self.assertEqual(result["primary_failure"], "ORIGINAL_FAILURE")
 
+    def test_renderer_capture_excludes_hostname_and_admission_retains_unsupported_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            for release, compatible in (("6.8.0-1001-azure", True), ("6.8.0-99-generic", True),
+                    ("6.17.0-1022-azure", True), ("6.17.0-1022-generic", False),
+                    ("6.17.1-1022-azure", False), ("6.18.0-1022-azure", False),
+                    ("7.0.0-1017-azure", True), ("7.0.0-1017-generic", False),
+                    ("7.0.1-1017-azure", False), ("7.1.0-1017-azure", False),
+                    ("6.14.0-1018-azure", False), ("6.8.1-custom", False), ("6.8.0-99-lowlatency", False)):
+                identity = SimpleNamespace(**dict(inert_ipv6_renderer()["kernel"], release=release))
+                with patch.object(H.os, "uname", return_value=identity) as uname:
+                    if compatible:
+                        observed = H.ipv6_renderer_admission(state)
+                        self.assertEqual(observed["kernel"]["release"], release)
+                    else:
+                        with self.assertRaisesRegex(ValueError, "^IPV6_RENDERER_UNSUPPORTED$"):
+                            H.ipv6_renderer_admission(state)
+                    uname.assert_called_once_with()
+                receipt = json.loads((state / "ipv6-renderer-admission.json").read_text())
+                self.assertEqual(receipt["compatible"], compatible)
+                self.assertEqual(receipt["snapshot"]["kernel"], vars(identity))
+                self.assertEqual(receipt["snapshot"]["profile"], {
+                    "6.17.0-1022-azure": "linux-6.17-azure-native-seq-v1",
+                    "7.0.0-1017-azure": "linux-7.0-azure-native-seq-v1",
+                }.get(release, H.IPV6_ROUTE_RENDERER_PROFILE))
+                self.assertEqual(receipt["code"], None if compatible else "IPV6_RENDERER_UNSUPPORTED")
+                self.assertEqual(set(receipt["snapshot"]["kernel"]), {"sysname", "release", "version", "machine"})
+                self.assertLess(len(json.dumps(receipt)), 1024)
+
+    def test_separate_reviewed_renderer_profiles_reject_cross_family_and_near_releases(self):
+        legacy = inert_ipv6_renderer()
+        azure = copy.deepcopy(legacy)
+        azure.update(profile="linux-7.0-azure-native-seq-v1")
+        azure["kernel"].update(release="7.0.0-1017-azure",
+            version="#17~24.04.1-Ubuntu SMP PREEMPT Thu Sep 24 18:46:57 UTC 2026")
+        for metadata in (legacy, azure):
+            H.validate_ipv6_renderer(metadata)
+        for profile, release in ((legacy["profile"], azure["kernel"]["release"]),
+                (azure["profile"], legacy["kernel"]["release"]),
+                (azure["profile"], "7.0.0-1017-generic"), (azure["profile"], "7.0.1-1017-azure"),
+                (azure["profile"], "7.1.0-1017-azure"), (azure["profile"], "7.0.0-1017-azure-extra"),
+                (azure["profile"], "7.0.0-1000000-azure"), (azure["profile"], "7.0.0-azure")):
+            metadata = copy.deepcopy(azure); metadata["profile"] = profile; metadata["kernel"]["release"] = release
+            with self.subTest(profile=profile, release=release), self.assertRaisesRegex(ValueError, "^IPV6_RENDERER_UNSUPPORTED$"):
+                H.validate_ipv6_renderer(metadata)
+        for key, value in (("machine", "aarch64"), ("sysname", "FreeBSD"), ("release", "7.0.0-1017-azure\n"),
+                           ("version", "x" * 257)):
+            metadata = copy.deepcopy(azure); metadata["kernel"][key] = value
+            with self.assertRaises(ValueError): H.validate_ipv6_renderer(metadata)
+        for profile in ("linux-7-native-seq-v1", "linux-7.0-native-seq-v1", None, True):
+            metadata = dict(azure, profile=profile)
+            with self.assertRaisesRegex(ValueError, "^IPV6_RENDERER_METADATA_SHAPE$"):
+                H.validate_ipv6_renderer(metadata)
+
+    def test_linux7_profile_preserves_raw_strict_and_completed_only_cancellation_boundaries(self):
+        KvmConfigurationTests.setUp(self)
+        self.state = lambda: KvmConfigurationTests.state(self)
+        for value in (self.before, self.after):
+            value["ipv6_renderer"]["profile"] = "linux-7.0-azure-native-seq-v1"
+            value["ipv6_renderer"]["kernel"]["release"] = "7.0.0-1017-azure"
+        reference = H.ipv6_route_snapshot(inert_ipv6_route(reference="00000002"))
+        self.after.update(ipv6_routes=reference["raw"], ipv6_route_metadata=reference["metadata"])
+        for mode in ("completed", "quiet", "cancel", "incomplete", "failed"):
+            self.life.first_signal = H.signal.SIGTERM if mode == "cancel" else None
+            result = KvmConfigurationTests.finalize(self, complete=mode != "incomplete",
+                original=ValueError("ORIGINAL_FAILURE") if mode == "failed" else None,
+                control_mode="quiet" if mode == "quiet" else None)
+            accepted = mode == "completed"
+            self.assertEqual(result["success"], accepted)
+            self.assertFalse(result["host_routes_dns_firewall_unchanged"])
+            self.assertEqual(result["host_configuration_checkpoint_accepted"], accepted)
+            self.assertEqual(result["baseline_comparison"]["before"], self.before)
+            self.assertEqual(result["baseline_comparison"]["after"], self.after)
+        # Reuse the existing cancellation timing matrix under the new identity:
+        # capture, configuration comparison and final diagnostic comparison.
+        self.life.first_signal = None
+        KvmConfigurationTests.test_cancellation_during_capture_or_after_comparison_revokes_configuration_mode(self)
+
+    def test_linux617_profile_rejects_crossed_families_near_releases_and_invalid_identity(self):
+        azure = inert_ipv6_renderer()
+        azure["profile"] = "linux-6.17-azure-native-seq-v1"
+        for release in ("6.17.0-1-azure", "6.17.0-1022-azure", "6.17.0-999999-azure"):
+            azure["kernel"]["release"] = release
+            H.validate_ipv6_renderer(azure)
+        for profile, release in ((azure["profile"], "6.8.0-1001-azure"),
+                (azure["profile"], "7.0.0-1017-azure"),
+                (H.IPV6_ROUTE_RENDERER_PROFILE, "6.17.0-1022-azure"),
+                ("linux-7.0-azure-native-seq-v1", "6.17.0-1022-azure")):
+            metadata = copy.deepcopy(azure); metadata["profile"] = profile; metadata["kernel"]["release"] = release
+            with self.subTest(profile=profile, release=release), self.assertRaisesRegex(ValueError, "^IPV6_RENDERER_UNSUPPORTED$"):
+                H.validate_ipv6_renderer(metadata)
+        for release in ("6.17.0-1022-generic", "6.17.0-1022-lowlatency", "6.17.1-1022-azure",
+                "6.16.0-1022-azure", "6.18.0-1022-azure", "6.17.0-1022-azure-extra",
+                "6.17.0-1000000-azure", "6.17.0--azure", "6.17.0-azure", "6.17.0-１２３-azure"):
+            metadata = copy.deepcopy(azure); metadata["kernel"]["release"] = release
+            with self.subTest(release=release), self.assertRaises(ValueError): H.validate_ipv6_renderer(metadata)
+        for key, value in (("machine", "aarch64"), ("sysname", "FreeBSD"),
+                ("release", "6.17.0-1022-azure\n"), ("version", "x" * 257), ("machine", True)):
+            metadata = copy.deepcopy(azure); metadata["kernel"][key] = value
+            with self.subTest(key=key, value=value), self.assertRaises(ValueError): H.validate_ipv6_renderer(metadata)
+        for profile in ("linux-6-native-seq-v1", "linux-6.17-native-seq-v1", None, True):
+            with self.subTest(profile=profile), self.assertRaisesRegex(ValueError, "^IPV6_RENDERER_METADATA_SHAPE$"):
+                H.validate_ipv6_renderer(dict(azure, profile=profile))
+
+    def test_linux617_profile_preserves_raw_strict_and_completed_only_cancellation_boundaries(self):
+        KvmConfigurationTests.setUp(self)
+        self.state = lambda: KvmConfigurationTests.state(self)
+        for value in (self.before, self.after):
+            value["ipv6_renderer"]["profile"] = "linux-6.17-azure-native-seq-v1"
+            value["ipv6_renderer"]["kernel"]["release"] = "6.17.0-1022-azure"
+        reference = H.ipv6_route_snapshot(inert_ipv6_route(reference="00000002"))
+        self.after.update(ipv6_routes=reference["raw"], ipv6_route_metadata=reference["metadata"])
+        for mode in ("completed", "quiet", "cancel", "incomplete", "failed"):
+            self.life.first_signal = H.signal.SIGTERM if mode == "cancel" else None
+            result = KvmConfigurationTests.finalize(self, complete=mode != "incomplete",
+                original=ValueError("ORIGINAL_FAILURE") if mode == "failed" else None,
+                control_mode="quiet" if mode == "quiet" else None)
+            accepted = mode == "completed"
+            self.assertEqual(result["success"], accepted)
+            self.assertFalse(result["host_routes_dns_firewall_unchanged"])
+            self.assertEqual(result["host_configuration_checkpoint_accepted"], accepted)
+            self.assertEqual(result["baseline_comparison"]["before"], self.before)
+            self.assertEqual(result["baseline_comparison"]["after"], self.after)
+        self.life.first_signal = None
+        KvmConfigurationTests.test_cancellation_during_capture_or_after_comparison_revokes_configuration_mode(self)
+
+    def test_missing_malformed_or_unsupported_renderer_never_accepts_identical_baselines(self):
+        KvmConfigurationTests.setUp(self)
+        valid = inert_ipv6_renderer()
+        cases = [None, {}, [], dict(valid, schema=True), dict(valid, schema=1.0),
+            dict(valid, profile="unreviewed"), dict(valid, unknown="PRIVATE")]
+        for key in valid:
+            missing = copy.deepcopy(valid); missing.pop(key); cases.append(missing)
+        for key, bound in (("sysname", 16), ("release", 128), ("version", 256), ("machine", 32)):
+            for value in (None, True, 1, "", "x" * (bound + 1), "PRIVATE\n", "é"):
+                bad = copy.deepcopy(valid); bad["kernel"][key] = value; cases.append(bad)
+            missing = copy.deepcopy(valid); missing["kernel"].pop(key); cases.append(missing)
+        for key, value in (("sysname", "FreeBSD"), ("machine", "aarch64"), ("release", "6.14.0-1018-azure")):
+            bad = copy.deepcopy(valid); bad["kernel"][key] = value; cases.append(bad)
+        bad = copy.deepcopy(valid); bad["kernel"]["nodename"] = "PRIVATE"; cases.append(bad)
+        for metadata in cases:
+            first = dict(self.before, ipv6_renderer=metadata)
+            for configuration in (False, True):
+                with self.subTest(metadata=metadata, configuration=configuration), self.assertRaises(ValueError):
+                    H.baseline_unchanged(first, copy.deepcopy(first), kvm_configuration=configuration)
+        missing = dict(self.before); missing.pop("ipv6_renderer")
+        for first, last in ((missing, copy.deepcopy(missing)), (missing, self.before), (self.before, missing)):
+            for configuration in (False, True):
+                with self.assertRaisesRegex(ValueError, "^IPV6_RENDERER_METADATA_SHAPE$"):
+                    H.baseline_unchanged(first, last, kvm_configuration=configuration)
+        changed = copy.deepcopy(self.before); changed["ipv6_renderer"]["kernel"]["version"] = "#2-Ubuntu SMP inert"
+        self.assertFalse(H.baseline_unchanged(self.before, changed, kvm_configuration=True))
+
+    def test_unsupported_kernel_or_layout_refuses_before_phase_and_retains_identity(self):
+        KvmConfigurationTests.setUp(self)
+        env = dict(RUNNER_TEMP=str(self.root), GITHUB_RUN_ID="1", GITHUB_RUN_ATTEMPT="1", GITHUB_SHA="a"*40)
+        for kind in ("kernel", "layout"):
+            env["GITHUB_RUN_ATTEMPT"] = "1" if kind == "kernel" else "2"
+            identity = SimpleNamespace(**inert_ipv6_renderer()["kernel"])
+            if kind == "kernel": identity.release = "6.14.0-1018-azure"
+            before = copy.deepcopy(self.before)
+            rejected = H.ipv6_route_snapshot(b"PRIVATE unsupported row\n")
+            before.update(ipv6_routes=rejected["raw"], ipv6_route_metadata=rejected["metadata"])
+            code = "IPV6_RENDERER_UNSUPPORTED" if kind == "kernel" else "IPV6_ROUTE_LAYOUT_UNSUPPORTED"
+            with patch.dict(H.os.environ, env, clear=True), patch.object(H.sys, "argv", ["hosted.py", "--reviewed-hosted-fixture"]), \
+                 patch.object(H, "guards"), patch.object(H, "kvm_admission", return_value=self.expected), \
+                 patch.object(H.os, "uname", return_value=identity), patch.object(H, "run_phase") as phase, \
+                 patch.object(H, "baseline", return_value=before), patch.object(H, "finalize") as finalizer:
+                with self.assertRaisesRegex(ValueError, "^" + code + "$"): H.main()
+                phase.assert_not_called(); finalizer.assert_called_once()
+                state = finalizer.call_args.args[0]
+                receipt = json.loads((state / "ipv6-renderer-admission.json").read_text())
+                self.assertEqual(receipt["compatible"], kind != "kernel")
+                self.assertEqual(receipt["snapshot"]["kernel"]["release"], identity.release)
+
+    def test_ambiguous_or_forged_classification_cannot_authorize_configuration(self):
+        KvmConfigurationTests.setUp(self)
+        ambiguous = copy.deepcopy(self.before)
+        ambiguous["ipv6_routes"]["sha256"] = "b" * 64
+        result = H.ipv6_route_comparison(*[dict(raw=value["ipv6_routes"], metadata=value["ipv6_route_metadata"])
+                                        for value in (self.before, ambiguous)])
+        self.assertEqual(result["classification"], "RAW_DIFFERENCE")
+        self.assertFalse(H.baseline_unchanged(self.before, ambiguous, kvm_configuration=True))
+        for cached in (dict(classification="REFERENCE_METADATA_ONLY"),
+                       dict(classification="UNCHANGED", metadata_valid=True)):
+            extra = dict(ambiguous, ipv6_route_comparison=cached)
+            with self.assertRaisesRegex(ValueError, "KVM_CONFIGURATION_BASELINE_SHAPE"):
+                H.baseline_unchanged(extra, copy.deepcopy(extra), kvm_configuration=True)
+            extra = copy.deepcopy(ambiguous); extra["ipv6_route_metadata"].update(cached)
+            with self.assertRaisesRegex(ValueError, "IPV6_ROUTE_METADATA_SHAPE"):
+                H.baseline_unchanged(extra, copy.deepcopy(extra), kvm_configuration=True)
+
+    def test_cleanup_failures_revoke_reference_only_configuration_after_comparison(self):
+        KvmConfigurationTests.setUp(self)
+        reference = H.ipv6_route_snapshot(inert_ipv6_route(reference="00000002"))
+        after = dict(self.before, ipv6_routes=reference["raw"], ipv6_route_metadata=reference["metadata"])
+        for mode in ("undrained", "removal", "late_cleanup", "capture_signal"):
+            self.life.first_signal = None; self.life.cleanup_errors = []; self.life.owned = []
+            state, evidence = KvmConfigurationTests.state(self)
+            def capture():
+                if mode == "capture_signal": self.life.first_signal = H.signal.SIGTERM
+                return after
+            def remove(path):
+                if mode == "removal": raise OSError("PRIVATE")
+                if mode == "late_cleanup": self.life.cleanup_errors.append("LATE_CLEANUP_FAILURE")
+                real_remove(path)
+            if mode == "undrained": self.life.owned.append(SimpleNamespace(pid=123))
+            real_remove = H.shutil.rmtree
+            with patch.object(self.life, "drain_all"), patch.object(H, "baseline", side_effect=capture), \
+                 patch.object(H.shutil, "rmtree", side_effect=remove):
+                try: H.finalize(state, evidence, self.before, True, None)
+                except RuntimeError: pass
+            result = json.loads((evidence / "result.json").read_text())
+            self.assertFalse(result["success"]); self.assertFalse(result["host_routes_dns_firewall_unchanged"])
+            self.assertFalse(result["host_configuration_checkpoint_accepted"])
+            self.assertEqual(result["baseline_acceptance_mode"], "STRICT_KVM_METADATA")
+            self.assertIn("HOST_BASELINE_UNCONFIRMED", result["cleanup_errors"])
+            self.assertEqual(result["baseline_comparison"]["ipv6_route_comparison"]["classification"], "REFERENCE_METADATA_ONLY")
+        self.life.owned = []; self.life.first_signal = None
+
     def test_source_binding_rejects_route_exceptions_or_missing_early_validation(self):
         source = (P.HERE / "hosted.py").read_text()
         S.ipv6_diagnostic_bindings(ast.parse(source))
-        for mutation in (source.replace('{"firewall", "kvm"} if kvm_configuration',
-                                       '{"firewall", "kvm", "ipv6_routes"} if kvm_configuration'),
+        for mutation in (source.replace('{"firewall", "kvm", "ipv6_routes", "ipv6_route_metadata"} if kvm_configuration',
+                                       '{"firewall", "kvm", "ipv6_routes", "ipv6_route_metadata", "ipv6_renderer"} if kvm_configuration'),
             source.replace('else {"firewall"}', 'else {"firewall", "ipv6_route_metadata"}'),
             source.replace('ipv6 = ipv6_route_comparison(*[', 'ipv6 = ignored_comparison(*['),
-            source.replace('ipv6 = read_ipv6_route_snapshot()', 'ipv6 = ignored_capture()')):
+            source.replace('ipv6 = read_ipv6_route_snapshot()', 'ipv6 = ignored_capture()'),
+            source.replace('validate_ipv6_renderer(value["ipv6_renderer"])', 'ignored_validate(value["ipv6_renderer"])'),
+            source.replace('("UNCHANGED", "REFERENCE_METADATA_ONLY")', '("UNCHANGED", "REFERENCE_METADATA_ONLY", "RAW_DIFFERENCE")'),
+            source.replace('renderer = ipv6_renderer_admission(state)', 'renderer = ignored_admission(state)'),
+            source.replace('validate_ipv6_renderer(value["ipv6_renderer"])', 'validate_ipv6_renderer(value["ipv6_renderer"], supported=False)'),
+            source.replace('r"6\\.17\\.0-[0-9]{1,6}-azure"', 'r".*"'),
+            source.replace('r"6\\.17\\.0-[0-9]{1,6}-azure"', 'r"6\\.17\\.0-[0-9]{1,6}-(?:generic|azure)"'),
+            source.replace('r"6\\.17\\.0-[0-9]{1,6}-azure"', 'r"6\\.17\\.[0-9]+-[0-9]{1,6}-azure"'),
+            source.replace('r"6\\.17\\.0-[0-9]{1,6}-azure"', 'r"6\\.[0-9]+\\.0-[0-9]{1,6}-azure"'),
+            source.replace('r"7\\.0\\.0-[0-9]{1,6}-azure"', 'r".*"'),
+            source.replace('r"7\\.0\\.0-[0-9]{1,6}-azure"', 'r"7\\.0\\.0-[0-9]{1,6}-(?:generic|azure)"')):
             with self.assertRaises(ValueError): S.ipv6_diagnostic_bindings(ast.parse(mutation))
 
 

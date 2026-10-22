@@ -51,10 +51,10 @@ def ipv6_diagnostic_bindings(parsed):
     baseline = functions["baseline_unchanged"]
     ignored = [node.value for node in baseline.body if isinstance(node, ast.Assign)
                and any(isinstance(target, ast.Name) and target.id == "ignored" for target in node.targets)]
-    expected = ast.parse('{"firewall", "kvm"} if kvm_configuration else {"firewall"}', mode="eval").body
-    require(len(ignored) == 1 and ast.dump(ignored[0]) == ast.dump(expected), "IPV6_RAW_BASELINE_STRICT")
+    expected = ast.parse('{"firewall", "kvm", "ipv6_routes", "ipv6_route_metadata"} if kvm_configuration else {"firewall"}', mode="eval").body
+    require(len(ignored) == 1 and ast.dump(ignored[0]) == ast.dump(expected), "IPV6_CONFIGURATION_EXCEPTION_ALLOWLIST")
     # Parse rejection must run before the existing equality fast path, with no
-    # route field added to the pre-existing firewall/KVM exception set.
+    # route exception in default/quiet/control comparisons.
     validate = next((index for index, node in enumerate(baseline.body)
                      if any(isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
                             and call.func.id == "ipv6_route_comparison" for call in ast.walk(node))), None)
@@ -65,6 +65,33 @@ def ipv6_diagnostic_bindings(parsed):
                  and isinstance(call.func, ast.Name) and call.func.id == "read_ipv6_route_snapshot"]
     require(len(producers) == 1 and not producers[0].args and not producers[0].keywords,
             "IPV6_SINGLE_CAPTURE")
+    renderers = [call for call in ast.walk(functions["baseline"]) if isinstance(call, ast.Call)
+                 and isinstance(call.func, ast.Name) and call.func.id == "ipv6_renderer_snapshot"]
+    require(len(renderers) == 1 and not renderers[0].args and not renderers[0].keywords,
+            "IPV6_SINGLE_RENDERER_CAPTURE")
+    renderer_validate = next((index for index, node in enumerate(baseline.body)
+                     if any(isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+                            and call.func.id == "validate_ipv6_renderer" for call in ast.walk(node))), None)
+    require(renderer_validate is not None and renderer_validate < equality, "IPV6_RENDERER_BEFORE_EQUALITY")
+    approved = ast.parse('not kvm_configuration or ipv6["classification"] in ("UNCHANGED", "REFERENCE_METADATA_ONLY")', mode="eval").body
+    require(any(ast.dump(node) == ast.dump(approved) for node in ast.walk(baseline)), "IPV6_CONFIGURATION_CLOSED_CLASSES")
+    main = functions["main"]
+    captures = [node.lineno for node in ast.walk(main) if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name) and node.func.id == "baseline"]
+    phases = [node.lineno for node in ast.walk(main) if isinstance(node, ast.Call)
+              and isinstance(node.func, ast.Name) and node.func.id == "run_phase"]
+    require(len(captures) == 1 and phases and captures[0] < min(phases), "IPV6_ADMISSION_BEFORE_PHASES")
+    admissions = [node.lineno for node in ast.walk(main) if isinstance(node, ast.Call)
+                  and isinstance(node.func, ast.Name) and node.func.id == "ipv6_renderer_admission"]
+    require(len(admissions) == 1 and admissions[0] < captures[0], "IPV6_RENDERER_ADMISSION_BEFORE_PHASES")
+    for function in functions.values():
+        for call in ast.walk(function):
+            if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == "validate_ipv6_renderer":
+                require(len(call.args) == 1 and not isinstance(call.args[0], ast.Starred), "IPV6_RENDERER_CALL_CONTRACT")
+                if call.keywords:
+                    require(function.name == "ipv6_renderer_snapshot" and len(call.keywords) == 1
+                            and call.keywords[0].arg == "supported" and isinstance(call.keywords[0].value, ast.Constant)
+                            and call.keywords[0].value.value is False, "IPV6_RENDERER_CAPTURE_ONLY_UNSUPPORTED")
 
 
 def main():

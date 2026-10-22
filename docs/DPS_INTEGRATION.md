@@ -1258,3 +1258,89 @@ before equality. Principal review and all 115 inert tests, the source gate and
 diff checks pass. These are Python mocks and source checks only. An exact-source
 hosted trial remains necessary; this change supplies no new native, Android,
 network, sensor or positioning acceptance and cannot explain the old failure.
+
+### Completed-emulator IPv6 configuration checkpoint candidate
+
+The diagnostic parent remains separate as PR13. Its actual
+[39831818416](https://github.com/VOLPAROSSA/volparossa-map/actions/runs/39831818416)
+tested exact source `5aa77806f3ecda6b5e0d10ac6822cc6fc0f0f29a`, tree
+`ac5fc661485345146760f9880a7b187d4429df54`, and remains **failed**. All eight
+JNI cases completed, registered groups drained and owned state was removed;
+`primary_failure` was null, while `cleanup_errors` was
+`["HOST_BASELINE_UNCONFIRMED"]`. Both the strict baseline and configuration
+acceptance booleans were false. Six IPv6 rows retained different 900-byte raw
+fingerprints, an identical 852-byte non-reference projection with SHA-256
+`651e17ca03aa4e9ab13585696e7641559122820a2ac81b769a32b22290039728`, and
+different 54-byte reference projections. The recomputed classification was
+`REFERENCE_METADATA_ONLY`. Artifact `12449471982` has 99,898 bytes and API/ZIP
+SHA-256 `79554ee10752624dbe4ea31fb91c090ff3090e300bfddbc031f78318d37cbdeb`.
+This observation establishes that trial's projected field difference, without
+identifying an actor or explaining earlier trials. The artifact has no kernel
+identity; this candidate does not retroactively establish its compatibility.
+
+The separate `fix/native-dps-ipv6-configuration-20261022` candidate starts from
+that exact source and retains all original raw and reference fingerprints. Its
+reviewed renderer profile is `linux-6.8-native-seq-v1`. Primary
+[Linux v6.8, exact commit `e8f897f4afef0031fe618a8e94127a0934896aba`](https://kernel.googlesource.com/pub/scm/linux/kernel/git/torvalds/linux/+/e8f897f4afef0031fe618a8e94127a0934896aba/net/ipv6/ip6_fib.c),
+renderer lines 2481–2512, prints metric, `refcount_read(&rt->fib6_ref)`, a
+literal zero use field, flags and device name. The whole source file has SHA-256
+`85d34af1d3fee187c8da53989c3e143ac9b4be2e20f78fe85b8831b07319fdb6` and
+SPDX `GPL-2.0-or-later`; no upstream code is imported. This corrects the earlier
+tag link's line anchor without changing the preserved historical evidence.
+
+The initial compatibility allowlist requires `Linux`, machine `x86_64`, and
+release `6.8.0-<one to six decimal ABI digits>-generic` or `-azure`. Existing
+Ubuntu 24.04 hosted guards still apply. This is an explicitly reviewed upstream
+renderer compatibility assumption plus strict observed-layout validation; it
+does not attest arbitrary downstream patches or the running kernel's complete
+source tree. Other kernel families/flavours require a separately reviewed
+profile. A different family is refused even when its route bytes happen to parse.
+
+One read-only uname capture selects only sysname, release, build/version and
+machine, bounded to 16/128/256/32 printable ASCII characters respectively.
+Hostname and addresses are not captured. `ipv6-renderer-admission.json` retains
+the bounded identity, requested profile, compatibility boolean and a closed
+refusal code. Unsupported identity stops before SDK acquisition or any phase;
+malformed route layout stops after retaining the initial baseline and before
+any phase. Missing/malformed identity cannot authorize acquisition. The initial
+baseline reuses the admitted identity, and later snapshots independently capture
+it again. Complete before/after identity metadata must match exactly and is
+retained as the new `ipv6_renderer` baseline component. The existing single
+bounded route read and parser remain unchanged: at most 1 MiB/4096 rows,
+retaining every other byte, whitespace, row order and duplicate multiplicity.
+
+Only the existing completed-emulator finalizer may select configuration mode.
+It recomputes classifications from the captured raw/projection snapshots; no
+supplied classification grants authority. Only valid `UNCHANGED` or
+`REFERENCE_METADATA_ONLY` projections qualify. `RAW_DIFFERENCE`, non-reference
+changes, inserted/removed/reordered nonidentical rows, invalid metadata and
+unsupported provenance fail. Identical non-reference rows with swapped reference
+values remain indistinguishable in the configuration projection; this grants no
+route identity or actor attribution. Quiet, cancelled, incomplete, failed and
+default comparisons retain raw IPv6 equality. KVM and firewall configuration
+rules and all other baseline predicates remain unchanged.
+
+The schema3 receipt retains `host_routes_dns_firewall_unchanged` as the strict
+KVM/IPv6 verdict under the existing firewall comparison policy. A reference-only
+change therefore leaves it explicitly **false**, even when the separate
+`host_configuration_checkpoint_accepted` is true and the mode is
+`COMPLETED_EMULATOR_CONFIGURATION`. That exception requires all phases, including
+the unchanged eight-test instrumentation acceptance, no primary error, drained
+owned process groups, removed owned state, no cleanup errors and no cancellation.
+Cleanup failure or a deferred signal during capture, configuration comparison or
+the final diagnostic comparison revokes the exception and restores strict mode.
+No second baseline, retry, wait, host write or execution authority is introduced.
+Matching configuration at the two checkpoints does not prove absence of transient
+configuration changes, release of all kernel reference-counted resources, full
+kernel-resource cleanup, or a complete host-baseline restoration.
+
+The inert inventory is **115 existing + 5 new = 120** tests. Existing field,
+row/order/count, malformed/missing metadata and cancellation tests now also cover
+the configuration path. New tests cover supported/unsupported bounded identity,
+hostname exclusion, refusal before phases, identical malformed/missing provenance,
+ambiguous/forged classification and cleanup failure revocation. All 120 tests,
+the source gate and whitespace checks pass locally. These are inert Python/file
+and source checks; no new Android, SDK, native, network, hardware, sensor or
+physical-positioning execution has occurred. Independent review and one exact-source
+hosted component gate precede one actual workflow trial; an unsupported live
+kernel must stop with its identity receipt rather than broaden the profile.

@@ -1,9 +1,10 @@
 # DPS location integration boundary
 
 This document maps the shared VOLPAROSSA positioning service (DPS) to Organic
-Maps' pinned native location inputs. A separate Android native-quality fixture
-is now authored below; its source checks are not Android execution evidence or
-evidence of improved positioning. The core design is
+Maps' pinned native location inputs. One bounded hosted synthetic debug
+Activity/JNI checkpoint is now accepted, as recorded at the end of this
+document. It does not exercise sensors or establish positioning improvement.
+The core design is
 [`DPS.md` at core PR #299 candidate `4e673a5a`](https://github.com/VOLPAROSSA/volparossa/blob/4e673a5a5a9b0c3ad08325999496b72461ba301a/docs/services/DPS.md).
 The corrected contract uses request field 64 and response field 64, retaining
 local-control envelope version 2 and DPS schema version 1. The initial prototype's
@@ -1481,3 +1482,41 @@ Android, network or physical-positioning execution was performed. Independent
 review and an exact-source hosted source gate precede any separately authorized
 actual trial. Source compatibility does not establish actual workload, privacy,
 host-baseline or full kernel-resource cleanup acceptance.
+
+### Accepted bounded synthetic debug-Activity/JNI checkpoint
+
+Hosted actual run
+[39844370003](https://github.com/VOLPAROSSA/volparossa-map/actions/runs/39844370003)
+used source `1546bf3ada1caf551e4b28e863a6402c5989ae08`, tree
+`714e806a71325ffab27e5b16e4e785305b73557b`. That tree is identical to the
+Map main integration merge `ae7a5ccdbd14d686bb87e9afb860d1d3f54d7693` after
+PR14, PR13, PR12 and PR10. Required Components checks passed before that merge.
+Its original artifact
+`12454922115` is 100,955 bytes with SHA-256
+`234b28aa81eca4ea68a9148845096b7a132f1976b5fbe547c24172ff7ce57a65`;
+the original evidence and audited summary are retained in the core repository
+at `.git/ci-evidence/map-linux617-39844370003/`.
+
+The run passed all eight registered synthetic JNI instrumentation cases on
+the installed debug Activity, including the final `RESULT_OK` diagnostic. Two
+separate cancellation controls also completed their expected interruption
+checks; six tracked processes per control were gone afterward, and registered
+process groups and owned state were cleaned up. The independent review accepted
+the 20-file source aggregate and checked the original artifact. This establishes the bounded fixture integration
+and its observed cleanup checks only.
+
+The execution used Linux `7.0.0-1017-azure`; it did not exercise a Linux 6.17
+runtime. Raw IPv6-route fingerprints matched at the recorded checkpoints.
+The firewall result was `COUNTERS_ONLY` and the KVM result was
+`TIMESTAMPS_ONLY`. The run accepted the completed-emulator configuration
+checkpoint, while the strict aggregate raw host comparison remained false.
+Therefore this is not evidence that the complete raw host snapshot or every
+transient/kernel resource was unchanged or absent.
+
+No sensors, physical positioning accuracy, the main Map navigation/rerouting
+consumer, OS application identity, confidential execution or Android sanitizer
+coverage were established. The debug fixture does not meet the full Map DPS
+goal or establish production positioning behavior. Keep that goal open; the
+next functional priority is integration of the real sensor/platform and main
+Map consumer paths. The completed fixture should only be repeated if a relevant
+change requires it.

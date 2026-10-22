@@ -46,6 +46,27 @@ def kvm_configuration_bindings(parsed):
             "KVM_BASELINE_CALL_INVENTORY")
 
 
+def ipv6_diagnostic_bindings(parsed):
+    functions = {node.name: node for node in parsed.body if isinstance(node, ast.FunctionDef)}
+    baseline = functions["baseline_unchanged"]
+    ignored = [node.value for node in baseline.body if isinstance(node, ast.Assign)
+               and any(isinstance(target, ast.Name) and target.id == "ignored" for target in node.targets)]
+    expected = ast.parse('{"firewall", "kvm"} if kvm_configuration else {"firewall"}', mode="eval").body
+    require(len(ignored) == 1 and ast.dump(ignored[0]) == ast.dump(expected), "IPV6_RAW_BASELINE_STRICT")
+    # Parse rejection must run before the existing equality fast path, with no
+    # route field added to the pre-existing firewall/KVM exception set.
+    validate = next((index for index, node in enumerate(baseline.body)
+                     if any(isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+                            and call.func.id == "ipv6_route_comparison" for call in ast.walk(node))), None)
+    equality = next((index for index, node in enumerate(baseline.body) if isinstance(node, ast.If)
+                     and ast.unparse(node.test) == "before == after"), None)
+    require(validate is not None and equality is not None and validate < equality, "IPV6_VALIDATE_BEFORE_EQUALITY")
+    producers = [call for call in ast.walk(functions["baseline"]) if isinstance(call, ast.Call)
+                 and isinstance(call.func, ast.Name) and call.func.id == "read_ipv6_route_snapshot"]
+    require(len(producers) == 1 and not producers[0].args and not producers[0].keywords,
+            "IPV6_SINGLE_CAPTURE")
+
+
 def main():
     locked = pins()
     upstream = json.loads((HERE.parents[1] / "upstream.lock.json").read_text())
@@ -77,6 +98,7 @@ def main():
     require(len(re.findall(r"@Test public void ", tests)) == 8 and "OK (8 tests)" in hosted, "INSTRUMENTATION_INVENTORY")
     parsed = ast.parse(hosted)
     kvm_configuration_bindings(parsed)
+    ipv6_diagnostic_bindings(parsed)
     constants = {node.targets[0].id: ast.literal_eval(node.value) for node in parsed.body
                  if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
                  and node.targets[0].id in ("PHASES", "KVM_PHASES", "KVM_GET_API_VERSION")}

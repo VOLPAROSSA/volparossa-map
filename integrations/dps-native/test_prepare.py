@@ -11,12 +11,22 @@ import stat
 import subprocess
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 import zipfile
 import prepare as P
 import tool_inputs as T
 import hosted as H
 import source_gate as S
+
+
+def inert_ipv6_route(**changes):
+    fields = dict(destination="20010db8000000000000000000000000", destination_prefix="40",
+        source="00000000000000000000000000000000", source_prefix="00",
+        gateway="00000000000000000000000000000000", metric="00000001", reference="00000001",
+        use="00000000", flags="00000001", device="lo")
+    fields.update(changes)
+    return (" ".join(fields[key] for key in ("destination", "destination_prefix", "source", "source_prefix",
+        "gateway", "metric", "reference", "use", "flags")) + " " + fields["device"].rjust(8) + "\n").encode()
 
 
 class PreparationTests(unittest.TestCase):
@@ -363,8 +373,10 @@ class FirewallSnapshotTests(unittest.TestCase):
         for mutation in (lambda x: x.update(schema=2), lambda x: x.update(unknown=1),
                          lambda x: x["raw"].update(sha256="raw policy")):
             malformed = copy.deepcopy(valid); mutation(malformed)
+            ipv6 = H.ipv6_route_snapshot(inert_ipv6_route())
+            baseline = dict(firewall=malformed, ipv6_routes=ipv6["raw"], ipv6_route_metadata=ipv6["metadata"])
             with self.assertRaisesRegex(ValueError, "FIREWALL_METADATA_SHAPE"):
-                H.baseline_unchanged(dict(firewall=malformed), dict(firewall=malformed))
+                H.baseline_unchanged(baseline, copy.deepcopy(baseline))
 
     def test_parser_byte_depth_node_and_numeric_bounds(self):
         with patch.object(H.json, "loads") as loads:
@@ -400,7 +412,9 @@ class FirewallSnapshotTests(unittest.TestCase):
     def test_baseline_uses_single_existing_read_with_json_flag_and_same_timeout(self):
         raw = json.dumps(inert_firewall()).encode()
         with patch.object(H.subprocess, "check_output", return_value=raw) as command, \
-             patch.object(H.Path, "read_bytes", return_value=b"inert"), patch.object(H.os, "readlink", return_value="net:[123]"), \
+             patch.object(H.Path, "read_bytes", return_value=b"inert"), \
+             patch.object(H, "read_ipv6_route_snapshot", return_value=H.ipv6_route_snapshot(inert_ipv6_route())), \
+             patch.object(H.os, "readlink", return_value="net:[123]"), \
              patch.object(H, "credentials", return_value={}), patch.object(H, "kvm_snapshot", return_value={}):
             snapshot = H.baseline()
         command.assert_called_once_with(["sudo", "-n", "nft", "-j", "list", "ruleset"], timeout=10)
@@ -417,7 +431,8 @@ class BaselineDiagnosticShimTests(unittest.TestCase):
         self.enterContext(patch.object(H.signal, "setitimer"))
         self.enterContext(patch.object(H.signal, "getitimer", return_value=(0.0, 0.0)))
         self.before = dict(netns="net:[123]", routes=dict(bytes=896, sha256="a" * 64),
-            ipv6_routes=dict(bytes=900, sha256="a" * 64), resolver=dict(bytes=970, sha256="a" * 64),
+            ipv6_routes=H.ipv6_route_snapshot(inert_ipv6_route())["raw"],
+            ipv6_route_metadata=H.ipv6_route_snapshot(inert_ipv6_route())["metadata"], resolver=dict(bytes=970, sha256="a" * 64),
             firewall=H.firewall_snapshot(json.dumps(inert_firewall()).encode()),
             credentials=dict(uid=[1001] * 3, gid=[1001] * 3, groups=[4, 1001]),
             kvm=dict(kvm_gid=993, acl=dict(present=False), device=dict(dev=6, ino=435, rdev=2792,
@@ -434,13 +449,15 @@ class BaselineDiagnosticShimTests(unittest.TestCase):
         capture.assert_called_once_with()
         self.assertTrue(result["success"]); self.assertFalse(state.exists())
         diagnostic = result["baseline_comparison"]
-        self.assertEqual(diagnostic, dict(schema=2, before=self.before, after=self.before,
+        self.assertEqual(diagnostic, dict(schema=3, before=self.before, after=self.before,
             changed_components=[], capture_error=None, diagnostic_error=None,
+            ipv6_route_comparison=dict(classification="UNCHANGED", raw_changed=False, metadata_valid=True,
+                non_refcount_changed=False, reference_metadata_changed=False, row_count_changed=False),
             firewall_comparison=dict(classification="UNCHANGED", raw_changed=False, config_changed=False, counters_changed=False)))
         self.assertEqual(json.loads((evidence / "result.json").read_text()), result)
 
     def test_every_component_difference_fails_exact_comparison_and_retains_both(self):
-        for component in self.before:
+        for component in (key for key in self.before if key != "ipv6_route_metadata"):
             with self.subTest(component=component):
                 after = copy.deepcopy(self.before)
                 if component == "netns": after[component] = "net:[124]"
@@ -469,8 +486,9 @@ class BaselineDiagnosticShimTests(unittest.TestCase):
         capture.assert_called_once_with()
         self.assertEqual(result["cleanup_errors"], ["OSError", "HOST_BASELINE_UNCONFIRMED"])
         self.assertEqual(result["primary_failure"], "ORIGINAL_FAILURE")
-        self.assertEqual(result["baseline_comparison"], dict(schema=2, before=self.before, after=None,
-            changed_components=None, capture_error="BASELINE_CAPTURE_FAILED", diagnostic_error=None, firewall_comparison=None))
+        self.assertEqual(result["baseline_comparison"], dict(schema=3, before=self.before, after=None,
+            changed_components=None, capture_error="BASELINE_CAPTURE_FAILED", diagnostic_error=None,
+            firewall_comparison=None, ipv6_route_comparison=None))
         self.assertNotIn("private error detail", (evidence / "result.json").read_text())
         self.assertFalse(state.exists()); self.assertFalse(result["success"])
 
@@ -1369,7 +1387,8 @@ class KvmConfigurationTests(unittest.TestCase):
         self.enterContext(patch.object(H.signal, "setitimer"))
         self.enterContext(patch.object(H.signal, "getitimer", return_value=(0.0, 0.0)))
         self.before = dict(netns="net:[123]", routes=dict(bytes=896, sha256="a"*64),
-            ipv6_routes=dict(bytes=900, sha256="a"*64), resolver=dict(bytes=970, sha256="a"*64),
+            ipv6_routes=H.ipv6_route_snapshot(inert_ipv6_route())["raw"],
+            ipv6_route_metadata=H.ipv6_route_snapshot(inert_ipv6_route())["metadata"], resolver=dict(bytes=970, sha256="a"*64),
             firewall=H.firewall_snapshot(json.dumps(inert_firewall()).encode()),
             credentials=dict(uid=[1001]*3, gid=[1001]*3, groups=[4,1001]),
             kvm=dict(kvm_gid=993, acl=dict(present=False), device=dict(dev=6, ino=435, rdev=2792,
@@ -1931,6 +1950,209 @@ class KvmShimTests(unittest.TestCase):
             H.main()
             build.assert_not_called(); finalizer.assert_called_once()
         self.assertEqual(observed, ["kvm-probe", "cancellation", "group-reaping", "public-build", "offline-build", "emulator"])
+
+
+class Ipv6RouteDiagnosticTests(unittest.TestCase):
+    """Pure proc-byte fixtures and owned-file orchestration; never host routes."""
+    def test_reference_only_projection_preserves_raw_and_every_other_byte(self):
+        raw = inert_ipv6_route()
+        before = H.ipv6_route_snapshot(raw)
+        after = H.ipv6_route_snapshot(inert_ipv6_route(reference="00000002"))
+        self.assertEqual(before["raw"], P.digest(raw))
+        self.assertEqual(before["metadata"]["row_count"], 1)
+        self.assertEqual(before["metadata"]["non_refcount"], after["metadata"]["non_refcount"])
+        self.assertNotEqual(before["metadata"]["reference_metadata"], after["metadata"]["reference_metadata"])
+        self.assertEqual(H.ipv6_route_comparison(before, after), dict(classification="REFERENCE_METADATA_ONLY",
+            raw_changed=True, metadata_valid=True, non_refcount_changed=False,
+            reference_metadata_changed=True, row_count_changed=False))
+        self.assertEqual(H.ipv6_route_comparison(before, before)["classification"], "UNCHANGED")
+        self.assertEqual(before, H.ipv6_route_snapshot(raw))
+        self.assertNotIn(raw[:32].decode(), json.dumps([before, after]))
+
+    def test_every_other_field_order_and_multiplicity_remain_configuration_differences(self):
+        raw = inert_ipv6_route()
+        before = H.ipv6_route_snapshot(raw)
+        changes = dict(destination="20010db8000000000000000000000001", destination_prefix="41",
+            source="20010db8000000000000000000000002", source_prefix="01",
+            gateway="20010db8000000000000000000000003", metric="00000002", use="00000001",
+            flags="00000002", device="eth0")
+        for key, value in changes.items():
+            with self.subTest(field=key):
+                after = H.ipv6_route_snapshot(inert_ipv6_route(**{key: value}))
+                result = H.ipv6_route_comparison(before, after)
+                self.assertTrue(result["metadata_valid"])
+                self.assertEqual(result["classification"], "NON_REFCOUNT_DIFFERENCE")
+                self.assertTrue(result["non_refcount_changed"])
+                self.assertFalse(result["reference_metadata_changed"])
+        other = inert_ipv6_route(metric="00000002")
+        for left, right in ((raw + other, other + raw), (raw, raw + raw), (raw + raw, raw)):
+            result = H.ipv6_route_comparison(H.ipv6_route_snapshot(left), H.ipv6_route_snapshot(right))
+            self.assertEqual(result["classification"], "NON_REFCOUNT_DIFFERENCE")
+            self.assertTrue(result["non_refcount_changed"])
+
+    def test_empty_and_duplicate_rows_are_valid_without_sorting_or_deduplication(self):
+        empty = H.ipv6_route_snapshot(b"")
+        self.assertEqual(empty["raw"], P.digest(b""))
+        self.assertEqual(empty["metadata"]["row_count"], 0)
+        self.assertEqual(H.ipv6_route_comparison(empty, empty)["classification"], "UNCHANGED")
+        row = inert_ipv6_route()
+        duplicate = H.ipv6_route_snapshot(row + row)
+        self.assertEqual(duplicate["metadata"]["row_count"], 2)
+        self.assertEqual(duplicate["raw"], P.digest(row + row))
+        self.assertNotEqual(duplicate["metadata"]["non_refcount"], H.ipv6_route_snapshot(row)["metadata"]["non_refcount"])
+        # Same non-reference rows remain positional: swapping reference values is
+        # reference metadata only, without identifying an actor or distinct route.
+        changed = inert_ipv6_route(reference="00000002")
+        comparison = H.ipv6_route_comparison(H.ipv6_route_snapshot(row + changed), H.ipv6_route_snapshot(changed + row))
+        self.assertEqual(comparison["classification"], "REFERENCE_METADATA_ONLY")
+        self.assertIsNone(H.ipv6_route_snapshot(inert_ipv6_route(device=""))["metadata"]["error"])
+        self.assertIsNone(H.ipv6_route_snapshot(inert_ipv6_route(device="a" * 15))["metadata"]["error"])
+
+    def test_unknown_or_malformed_rows_retain_only_raw_digest_and_closed_rejection(self):
+        raw = inert_ipv6_route()
+        cases = [b"\n", raw.rstrip(b"\n"), raw + b"unknown PRIVATE row\n", raw.replace(b" ", b"\t", 1),
+            raw.replace(b"\n", b"\r\n"), raw.replace(b"00000001", b"0000000g", 1),
+            raw.replace(b"20010db8", b"20010DB8"), raw.replace(b"      lo", b"     lo"),
+            inert_ipv6_route(destination_prefix="81"), inert_ipv6_route(source_prefix="ff"),
+            inert_ipv6_route(device="."), inert_ipv6_route(device=".."), inert_ipv6_route(device="a" * 16),
+            inert_ipv6_route(device="../PRIVATE"), raw.rstrip(b"\n") + b" extra\n"]
+        for key in ("destination", "destination_prefix", "source", "source_prefix", "gateway", "metric", "reference", "use", "flags"):
+            tokens = raw.split()
+            index = ("destination", "destination_prefix", "source", "source_prefix", "gateway", "metric", "reference", "use", "flags").index(key)
+            # Widths are fixed, even when the numerical value is unchanged.
+            cases.append(inert_ipv6_route(**{key: tokens[index].decode() + "0"}))
+        for malformed in cases:
+            with self.subTest(length=len(malformed)):
+                snapshot = H.ipv6_route_snapshot(malformed)
+                self.assertEqual(snapshot["raw"], P.digest(malformed))
+                self.assertEqual(snapshot["metadata"], dict(schema=1, error="IPV6_ROUTE_ROW_SHAPE",
+                    non_refcount=None, reference_metadata=None, row_count=None))
+                self.assertEqual(H.ipv6_route_comparison(snapshot, snapshot)["classification"], "PARSE_REJECTED")
+                self.assertNotIn("PRIVATE", json.dumps(snapshot))
+
+    def test_byte_row_and_type_bounds_fail_closed(self):
+        for raw in (None, True, False, "PRIVATE", bytearray(b"PRIVATE"), 1, b"x" * (H.IPV6_ROUTE_BYTES + 1)):
+            with self.subTest(type=type(raw).__name__), self.assertRaisesRegex(ValueError, "^IPV6_ROUTE_BYTES$"):
+                H.ipv6_route_snapshot(raw)
+        row = inert_ipv6_route()
+        maximum = H.ipv6_route_snapshot(row * H.IPV6_ROUTE_ROWS)
+        self.assertIsNone(maximum["metadata"]["error"])
+        self.assertEqual(maximum["metadata"]["row_count"], H.IPV6_ROUTE_ROWS)
+        excess = row * (H.IPV6_ROUTE_ROWS + 1)
+        rejected = H.ipv6_route_snapshot(excess)
+        self.assertEqual(rejected["raw"], P.digest(excess))
+        self.assertEqual(rejected["metadata"]["error"], "IPV6_ROUTE_ROW_BOUND")
+        self.assertEqual(H.ipv6_route_snapshot(b"x" * H.IPV6_ROUTE_BYTES)["metadata"]["error"], "IPV6_ROUTE_ROW_SHAPE")
+
+    def test_closed_metadata_rejects_missing_extra_bool_and_identical_invalid_shapes(self):
+        valid = H.ipv6_route_snapshot(inert_ipv6_route())
+        cases = [None, {}, [], dict(valid, extra="PRIVATE")]
+        for outer in ("raw", "metadata"):
+            missing = copy.deepcopy(valid); missing.pop(outer); cases.append(missing)
+            unknown = copy.deepcopy(valid); unknown[outer]["extra"] = "PRIVATE"; cases.append(unknown)
+        for outer, keys in (("raw", ("bytes", "sha256")), ("metadata", ("schema", "error", "row_count", "non_refcount", "reference_metadata"))):
+            for key in keys:
+                missing = copy.deepcopy(valid); missing[outer].pop(key); cases.append(missing)
+                for value in (True, False, None, "PRIVATE", -1, 1.0):
+                    # error=None is the one existing nullable success field.
+                    if key == "error" and value is None: continue
+                    malformed = copy.deepcopy(valid); malformed[outer][key] = value; cases.append(malformed)
+        for key in ("non_refcount", "reference_metadata"):
+            for item, value in (("bytes", True), ("bytes", 2**64), ("sha256", "PRIVATE"), ("extra", 1)):
+                malformed = copy.deepcopy(valid); malformed["metadata"][key][item] = value; cases.append(malformed)
+        for malformed in cases:
+            with self.subTest(shape=type(malformed).__name__), self.assertRaisesRegex(ValueError, "^IPV6_ROUTE_METADATA_SHAPE$"):
+                H.ipv6_route_comparison(malformed, copy.deepcopy(malformed))
+
+    def test_one_bounded_read_supplies_raw_and_metadata_for_each_checkpoint(self):
+        rows = [inert_ipv6_route(), inert_ipv6_route(reference="00000002")]
+        snapshots = []
+        for raw in rows:
+            stream = SimpleNamespace(read=Mock(return_value=raw))
+            with patch.object(H.Path, "open") as opened:
+                opened.return_value.__enter__.return_value = stream
+                snapshots.append(H.read_ipv6_route_snapshot())
+                opened.assert_called_once_with("rb")
+                stream.read.assert_called_once_with(H.IPV6_ROUTE_BYTES + 1)
+            self.assertEqual(snapshots[-1], H.ipv6_route_snapshot(raw))
+        self.assertEqual(H.ipv6_route_comparison(*snapshots)["classification"], "REFERENCE_METADATA_ONLY")
+        with patch.object(H.Path, "open") as opened:
+            opened.return_value.__enter__.return_value.read.return_value = b"x" * (H.IPV6_ROUTE_BYTES + 1)
+            with self.assertRaisesRegex(ValueError, "^IPV6_ROUTE_BYTES$"): H.read_ipv6_route_snapshot()
+
+    def test_all_baseline_modes_reject_reference_only_and_rejected_identical_rows(self):
+        # Reuse only inert setup/finalizer helpers, without inheriting test methods.
+        KvmConfigurationTests.setUp(self)
+        self.state = lambda: KvmConfigurationTests.state(self)
+        ref = H.ipv6_route_snapshot(inert_ipv6_route(reference="00000002"))
+        rejected = H.ipv6_route_snapshot(b"PRIVATE unknown row\n")
+        for case in ("reference", "rejected"):
+            before = copy.deepcopy(self.before); after = copy.deepcopy(self.before)
+            if case == "rejected": before.update(ipv6_routes=rejected["raw"], ipv6_route_metadata=rejected["metadata"])
+            observed = ref if case == "reference" else rejected
+            after.update(ipv6_routes=observed["raw"], ipv6_route_metadata=observed["metadata"])
+            for configuration in (False, True):
+                self.assertFalse(H.baseline_unchanged(before, after, kvm_configuration=configuration))
+            for mode in ("normal", "quiet", "cancel", "incomplete", "completed", "failed"):
+                self.life.first_signal = H.signal.SIGTERM if mode == "cancel" else None
+                result = KvmConfigurationTests.finalize(self, before=before, after=after,
+                    complete=mode not in ("normal", "incomplete"),
+                    original=ValueError("ORIGINAL_FAILURE") if mode == "failed" else None,
+                    control_mode="quiet" if mode == "quiet" else None)
+                self.assertFalse(result["success"], (case, mode))
+                self.assertFalse(result["host_routes_dns_firewall_unchanged"])
+                self.assertFalse(result["host_configuration_checkpoint_accepted"])
+                self.assertIn("HOST_BASELINE_UNCONFIRMED", result["cleanup_errors"])
+                diagnostic = result["baseline_comparison"]
+                self.assertEqual(diagnostic["before"], before); self.assertEqual(diagnostic["after"], after)
+                self.assertEqual(diagnostic["ipv6_route_comparison"]["classification"],
+                    "REFERENCE_METADATA_ONLY" if case == "reference" else "PARSE_REJECTED")
+                self.assertNotIn("PRIVATE", json.dumps(result))
+                self.assertLessEqual(len(json.dumps(result, indent=2).encode()), 16384)
+        for key in ("ipv6_routes", "ipv6_route_metadata"):
+            missing = copy.deepcopy(self.before); missing.pop(key)
+            for configuration in (False, True):
+                with self.assertRaisesRegex(ValueError, "IPV6_ROUTE_METADATA_SHAPE"):
+                    H.baseline_unchanged(missing, missing, kvm_configuration=configuration)
+        inconsistent = copy.deepcopy(self.before)
+        inconsistent["ipv6_route_metadata"]["non_refcount"]["sha256"] = "b" * 64
+        with self.assertRaisesRegex(ValueError, "IPV6_ROUTE_METADATA_SHAPE"):
+            H.baseline_unchanged(self.before, inconsistent)
+        diagnostic = H.baseline_diagnostic(self.before, inconsistent, None)
+        self.assertEqual(diagnostic["diagnostic_error"], "BASELINE_METADATA_SHAPE")
+        self.assertEqual(diagnostic["after"]["ipv6_routes"], self.before["ipv6_routes"])
+
+    def test_missing_both_ipv6_fields_never_accepts_matching_or_partial_baselines(self):
+        KvmConfigurationTests.setUp(self)
+        self.state = lambda: KvmConfigurationTests.state(self)
+        missing = copy.deepcopy(self.before)
+        missing.pop("ipv6_routes"); missing.pop("ipv6_route_metadata")
+        for before, after in ((missing, copy.deepcopy(missing)), (missing, self.before), (self.before, missing)):
+            for configuration in (False, True):
+                with self.subTest(configuration=configuration), self.assertRaisesRegex(ValueError, "^IPV6_ROUTE_METADATA_SHAPE$"):
+                    H.baseline_unchanged(before, after, kvm_configuration=configuration)
+        for mode in ("normal", "quiet", "cancel", "incomplete", "completed", "failed"):
+            self.life.first_signal = H.signal.SIGTERM if mode == "cancel" else None
+            result = KvmConfigurationTests.finalize(self, before=missing, after=copy.deepcopy(missing),
+                complete=mode not in ("normal", "incomplete"),
+                original=ValueError("ORIGINAL_FAILURE") if mode == "failed" else None,
+                control_mode="quiet" if mode == "quiet" else None)
+            self.assertFalse(result["success"], mode)
+            self.assertFalse(result["host_routes_dns_firewall_unchanged"])
+            self.assertFalse(result["host_configuration_checkpoint_accepted"])
+            self.assertIn("HOST_BASELINE_UNCONFIRMED", result["cleanup_errors"])
+            self.assertTrue(result["registered_groups_drained"] and result["owned_state_removed"])
+            if mode == "failed": self.assertEqual(result["primary_failure"], "ORIGINAL_FAILURE")
+
+    def test_source_binding_rejects_route_exceptions_or_missing_early_validation(self):
+        source = (P.HERE / "hosted.py").read_text()
+        S.ipv6_diagnostic_bindings(ast.parse(source))
+        for mutation in (source.replace('{"firewall", "kvm"} if kvm_configuration',
+                                       '{"firewall", "kvm", "ipv6_routes"} if kvm_configuration'),
+            source.replace('else {"firewall"}', 'else {"firewall", "ipv6_route_metadata"}'),
+            source.replace('ipv6 = ipv6_route_comparison(*[', 'ipv6 = ignored_comparison(*['),
+            source.replace('ipv6 = read_ipv6_route_snapshot()', 'ipv6 = ignored_capture()')):
+            with self.assertRaises(ValueError): S.ipv6_diagnostic_bindings(ast.parse(mutation))
 
 
 if __name__ == "__main__":

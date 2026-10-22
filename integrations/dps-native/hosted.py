@@ -32,6 +32,8 @@ KVM = Path("/dev/kvm")
 KVM_GET_API_VERSION = 0xAE00  # Linux UAPI _IO(KVMIO, 0x00), system query only.
 PHASES = ("kvm-probe", "public-build", "offline-build", "emulator")
 KVM_PHASES = ("kvm-probe", "emulator")
+IPV6_ROUTE_BYTES = 1024**2
+IPV6_ROUTE_ROWS = 4096
 
 
 def guards(env):
@@ -603,14 +605,96 @@ def firewall_comparison(before, after):
                 config_changed=config_changed, counters_changed=counters_changed)
 
 
+def ipv6_route_snapshot(raw):
+    """Hash one bounded proc snapshot; only the reference-count bytes are split.
+
+    Layout: Linux v6.8 net/ipv6/ip6_fib.c ipv6_route_native_seq_show.
+    These projections diagnose differences; neither grants baseline acceptance.
+    Empty tables are valid. Duplicate rows and their order remain significant.
+    """
+    require(type(raw) is bytes and len(raw) <= IPV6_ROUTE_BYTES, "IPV6_ROUTE_BYTES")
+    metadata = dict(schema=1, error=None, non_refcount=None, reference_metadata=None, row_count=None)
+    snapshot = dict(raw=digest(raw), metadata=metadata)
+    try:
+        rows = raw.splitlines(keepends=True)
+        require(len(rows) <= IPV6_ROUTE_ROWS, "IPV6_ROUTE_ROW_BOUND")
+        non_refcount, references = [], []
+        layout = (rb"[0-9a-f]{32} ([0-9a-f]{2}) [0-9a-f]{32} ([0-9a-f]{2}) "
+                  rb"[0-9a-f]{32} [0-9a-f]{8} (?P<reference>[0-9a-f]{8}) "
+                  rb"[0-9a-f]{8} [0-9a-f]{8} (?P<device> *[A-Za-z0-9_.-]{0,15})\n")
+        for row in rows:
+            match = re.fullmatch(layout, row)
+            require(match is not None, "IPV6_ROUTE_ROW_SHAPE")
+            require(all(int(match[index], 16) <= 128 for index in (1, 2)), "IPV6_ROUTE_ROW_SHAPE")
+            device = match["device"].lstrip(b" ")
+            require(device not in (b".", b"..") and match["device"] == device.rjust(8, b" "),
+                    "IPV6_ROUTE_ROW_SHAPE")
+            start, end = match.span("reference")
+            non_refcount.append(row[:start] + row[end:])
+            references.append(match["reference"] + b"\n")
+        metadata.update(non_refcount=digest(b"".join(non_refcount)),
+                        reference_metadata=digest(b"".join(references)), row_count=len(rows))
+    except ValueError as error:
+        # Fixed internal codes only; preserve the raw fingerprint on row rejection.
+        metadata["error"] = "IPV6_ROUTE_ROW_BOUND" if str(error) == "IPV6_ROUTE_ROW_BOUND" else "IPV6_ROUTE_ROW_SHAPE"
+    return snapshot
+
+
+def read_ipv6_route_snapshot():
+    # One bounded read provides both raw and projected fingerprints. No reread,
+    # sorting, deduplication, host route output or unbounded read_bytes allocation.
+    with Path("/proc/net/ipv6_route").open("rb") as source:
+        raw = source.read(IPV6_ROUTE_BYTES + 1)
+    return ipv6_route_snapshot(raw)
+
+
+def ipv6_route_comparison(before, after):
+    """Closed fingerprints only; rejected parses never become valid baselines."""
+    def fingerprint(value, bound):
+        return (type(value) is dict and set(value) == {"bytes", "sha256"}
+                and type(value["bytes"]) is int and 0 <= value["bytes"] <= bound
+                and type(value["sha256"]) is str and re.fullmatch("[0-9a-f]{64}", value["sha256"]) is not None)
+    for value in (before, after):
+        require(type(value) is dict and set(value) == {"raw", "metadata"}
+                and fingerprint(value["raw"], IPV6_ROUTE_BYTES), "IPV6_ROUTE_METADATA_SHAPE")
+        meta = value["metadata"]
+        require(type(meta) is dict and set(meta) == {"schema", "error", "non_refcount", "reference_metadata", "row_count"}
+                and type(meta["schema"]) is int and meta["schema"] == 1, "IPV6_ROUTE_METADATA_SHAPE")
+        if meta["error"] is not None:
+            require(type(meta["error"]) is str and meta["error"] in ("IPV6_ROUTE_ROW_BOUND", "IPV6_ROUTE_ROW_SHAPE")
+                    and all(meta[key] is None for key in ("non_refcount", "reference_metadata", "row_count")),
+                    "IPV6_ROUTE_METADATA_SHAPE")
+        else:
+            require(type(meta["row_count"]) is int and 0 <= meta["row_count"] <= IPV6_ROUTE_ROWS
+                    and fingerprint(meta["non_refcount"], IPV6_ROUTE_BYTES)
+                    and fingerprint(meta["reference_metadata"], IPV6_ROUTE_ROWS * 9)
+                    and meta["reference_metadata"]["bytes"] == meta["row_count"] * 9
+                    and meta["non_refcount"]["bytes"] + meta["row_count"] * 8 == value["raw"]["bytes"],
+                    "IPV6_ROUTE_METADATA_SHAPE")
+    raw_changed = before["raw"] != after["raw"]
+    valid = before["metadata"]["error"] is None and after["metadata"]["error"] is None
+    fields = {key + "_changed": before["metadata"][key] != after["metadata"][key] if valid else None
+              for key in ("non_refcount", "reference_metadata", "row_count")}
+    require(not valid or raw_changed or not any(fields.values()), "IPV6_ROUTE_METADATA_SHAPE")
+    classification = ("PARSE_REJECTED" if not valid else "NON_REFCOUNT_DIFFERENCE"
+        if fields["non_refcount_changed"] or fields["row_count_changed"] else "REFERENCE_METADATA_ONLY"
+        if fields["reference_metadata_changed"] else "RAW_DIFFERENCE" if raw_changed else "UNCHANGED")
+    return dict(classification=classification, raw_changed=raw_changed, metadata_valid=valid, **fields)
+
+
 def baseline_unchanged(before, after, *, kvm_configuration=False):
     require(type(kvm_configuration) is bool, "KVM_COMPARISON_MODE")
+    require(all(type(value) is dict and "ipv6_routes" in value and "ipv6_route_metadata" in value
+                for value in (before, after)), "IPV6_ROUTE_METADATA_SHAPE")
+    ipv6 = ipv6_route_comparison(*[dict(raw=value["ipv6_routes"], metadata=value["ipv6_route_metadata"])
+                                   for value in (before, after)])
+    if not ipv6["metadata_valid"]: return False
     comparison = None
     if type(before) is dict and type(after) is dict and ("kvm" in before or "kvm" in after):
         require("kvm" in before and "kvm" in after, "KVM_METADATA_SHAPE")
         comparison = kvm_comparison(before["kvm"], after["kvm"])
     if kvm_configuration:
-        components = {"netns", "routes", "ipv6_routes", "resolver", "firewall", "credentials", "kvm"}
+        components = {"netns", "routes", "ipv6_routes", "ipv6_route_metadata", "resolver", "firewall", "credentials", "kvm"}
         require(type(before) is dict and type(after) is dict and set(before) == set(after) == components,
                 "KVM_CONFIGURATION_BASELINE_SHAPE")
         diagnostic = baseline_diagnostic(before, after, None)
@@ -630,8 +714,9 @@ def baseline_unchanged(before, after, *, kvm_configuration=False):
 
 def baseline():
     rules = subprocess.check_output(["sudo", "-n", "nft", "-j", "list", "ruleset"], timeout=10)
+    ipv6 = read_ipv6_route_snapshot()
     return dict(netns=os.readlink("/proc/self/ns/net"), routes=digest(Path("/proc/net/route").read_bytes()),
-                ipv6_routes=digest(Path("/proc/net/ipv6_route").read_bytes()),
+                ipv6_routes=ipv6["raw"], ipv6_route_metadata=ipv6["metadata"],
                 resolver=digest(Path("/etc/resolv.conf").read_bytes()), firewall=firewall_snapshot(rules),
                 credentials=credentials(), kvm=kvm_snapshot())
 
@@ -1373,10 +1458,11 @@ def failure_code(error):
 
 def baseline_diagnostic(before, after, capture_error):
     """Only fixed metadata/hash snapshots; never raw host configuration or errors."""
-    components = ("netns", "routes", "ipv6_routes", "resolver", "firewall", "credentials", "kvm")
+    components = ("netns", "routes", "ipv6_routes", "ipv6_route_metadata", "resolver", "firewall", "credentials", "kvm")
     require(capture_error in (None, "BASELINE_NOT_CAPTURED", "BASELINE_BEFORE_UNAVAILABLE", "BASELINE_CAPTURE_FAILED"),
             "BASELINE_CAPTURE_CODE")
-    result = dict(schema=2, before=None, after=None, changed_components=None, firewall_comparison=None,
+    result = dict(schema=3, before=None, after=None, changed_components=None, firewall_comparison=None,
+                  ipv6_route_comparison=None,
                   capture_error=capture_error, diagnostic_error=None)
 
     def integer(value):
@@ -1389,7 +1475,12 @@ def baseline_diagnostic(before, after, capture_error):
     def snapshot(value):
         if type(value) is not dict or set(value) != set(components): return False
         if type(value["netns"]) is not str or re.fullmatch(r"net:\[[0-9]{1,20}\]", value["netns"]) is None: return False
-        if not all(fingerprint(value[key]) for key in components[1:4]): return False
+        if not all(fingerprint(value[key]) for key in ("routes", "ipv6_routes", "resolver")): return False
+        try:
+            ipv6 = dict(raw=value["ipv6_routes"], metadata=value["ipv6_route_metadata"])
+            ipv6_route_comparison(ipv6, ipv6)
+        except ValueError:
+            return False
         firewall = value["firewall"]
         if (type(firewall) is not dict or set(firewall) != {"schema", "raw", "config", "counters", "counter_count"}
                 or type(firewall["schema"]) is not int or firewall["schema"] != 1
@@ -1420,6 +1511,11 @@ def baseline_diagnostic(before, after, capture_error):
     if result["before"] is not None and result["after"] is not None:
         result["changed_components"] = [key for key in components if before[key] != after[key]]
         result["firewall_comparison"] = firewall_comparison(before["firewall"], after["firewall"])
+        try:
+            result["ipv6_route_comparison"] = ipv6_route_comparison(*[
+                dict(raw=value["ipv6_routes"], metadata=value["ipv6_route_metadata"]) for value in (before, after)])
+        except ValueError:
+            result["diagnostic_error"] = "BASELINE_METADATA_SHAPE"
     return result
 
 

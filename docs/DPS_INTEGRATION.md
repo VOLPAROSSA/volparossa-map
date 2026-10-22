@@ -1198,3 +1198,63 @@ These are inert source/mocked observations only. Independent review and a new
 exact-source full hosted trial remain necessary; this candidate has no actual
 Android/KVM acceptance yet and supplies no sensor, main navigation, physical
 positioning or private protected-execution claim.
+
+
+### IPv6 route diagnostics candidate; raw verdict remains strict
+
+Full actual [39699719553](https://github.com/VOLPAROSSA/volparossa-map/actions/runs/39699719553)
+on Map `058532d8569759c7cbcb63d7546b7c006574b8b7` passed its native emulator and
+owned cleanup checks but failed the outer IPv6 raw route fingerprint comparison.
+The immutable artifact `12392318675.zip` retains only the 900-byte table's raw
+fingerprints, with no route rows or field values. That failed verdict stays in
+force: the changed field cannot be reconstructed from those hashes. A reference
+count change is a hypothesis only, without an identified actor, observed transient
+configuration change, or bound historical trial-kernel implementation.
+
+Primary [Linux v6.8 `ipv6_route_native_seq_show`](https://github.com/torvalds/linux/blob/v6.8/net/ipv6/ip6_fib.c#L2339-L2365)
+emits destination/prefix, source/prefix, gateway, metric, reference count, a zero
+use field, flags and padded device name. The new source-only diagnostic separates
+just the eight reference-count hex bytes per row. Its non-reference fingerprint
+retains all other bytes, including metric, use, flags, whitespace, interface,
+newlines, order and duplicate multiplicity. The reference fingerprint preserves
+row positions and cardinality. Identical non-reference rows with exchanged
+reference values remain ambiguous; no sorting, deduplication or route/actor
+identity is inferred. An empty table is a valid zero-row snapshot, distinct from
+a blank line or unreadable input. The parser supports the fixed lowercase hex
+widths, prefixes through 128 and empty or bounded ASCII device names; unsupported
+layouts or names are rejected rather than guessed. No upstream code is imported.
+
+Each checkpoint opens the fixed proc path once and makes one read capped at
+1 MiB plus one overflow-detection byte; parsing allows at most 4096 rows. Both
+original raw and diagnostic fingerprints come from that same byte buffer. New
+baselines retain `ipv6_routes` as the original raw fingerprint and add mandatory
+closed `ipv6_route_metadata` with schema, projection hashes/byte counts and row
+count. Bounded malformed input retains its raw fingerprint plus a fixed rejection
+code with null projections; even two identical rejected snapshots fail. Overflow
+or unreadable input fails capture without pretending a truncated fingerprint is
+a complete original snapshot. Unknown/missing keys, bool/int confusion, invalid
+sizes/digests and inconsistent metadata fail closed. Route bytes, IP addresses,
+interfaces and raw errors are never emitted. Old artifacts do not gain inferred
+metadata and are not adopted as replacement baselines.
+
+The nested baseline diagnostic advances from schema 2 to **3**, retaining both
+original snapshots and adding `ipv6_route_comparison`. It reports raw,
+non-reference, reference-metadata and row-count differences separately; parse
+rejection yields null projection comparisons. The outer finalizer remains schema
+3 and its acceptance predicates stay strict for route hashes: **even
+`REFERENCE_METADATA_ONLY` fails** in normal, quiet, cancellation, incomplete,
+failed and completed-emulator modes. The existing KVM and firewall policies,
+cleanup and 16 KiB evidence bounds are preserved. Source bindings prohibit route
+exceptions and require parse validation before equality. The workflow, pins,
+JNI, Java tests, instrumentation acceptance and execution authority are unchanged.
+
+The inert inventory is **105 existing + 10 new = 115**. New tests cover every
+non-reference field, reference-only changes, row order/count/duplicates, empty
+and malformed layouts, widths/types/bounds, raw-evidence privacy, single-read
+capture and strict rejection across all baseline modes, including both IPv6
+fields being absent from matching snapshots. Independent Sol review found the
+both-fields-absent validation gap; the narrow correction now requires both fields
+before equality. Principal review and all 115 inert tests, the source gate and
+diff checks pass. These are Python mocks and source checks only. An exact-source
+hosted trial remains necessary; this change supplies no new native, Android,
+network, sensor or positioning acceptance and cannot explain the old failure.

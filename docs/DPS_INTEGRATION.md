@@ -1198,3 +1198,286 @@ These are inert source/mocked observations only. Independent review and a new
 exact-source full hosted trial remain necessary; this candidate has no actual
 Android/KVM acceptance yet and supplies no sensor, main navigation, physical
 positioning or private protected-execution claim.
+
+
+### IPv6 route diagnostics candidate; raw verdict remains strict
+
+Full actual [39699719553](https://github.com/VOLPAROSSA/volparossa-map/actions/runs/39699719553)
+on Map `058532d8569759c7cbcb63d7546b7c006574b8b7` passed its native emulator and
+owned cleanup checks but failed the outer IPv6 raw route fingerprint comparison.
+The immutable artifact `12392318675.zip` retains only the 900-byte table's raw
+fingerprints, with no route rows or field values. That failed verdict stays in
+force: the changed field cannot be reconstructed from those hashes. A reference
+count change is a hypothesis only, without an identified actor, observed transient
+configuration change, or bound historical trial-kernel implementation.
+
+Primary [Linux v6.8 `ipv6_route_native_seq_show`](https://github.com/torvalds/linux/blob/v6.8/net/ipv6/ip6_fib.c#L2339-L2365)
+emits destination/prefix, source/prefix, gateway, metric, reference count, a zero
+use field, flags and padded device name. The new source-only diagnostic separates
+just the eight reference-count hex bytes per row. Its non-reference fingerprint
+retains all other bytes, including metric, use, flags, whitespace, interface,
+newlines, order and duplicate multiplicity. The reference fingerprint preserves
+row positions and cardinality. Identical non-reference rows with exchanged
+reference values remain ambiguous; no sorting, deduplication or route/actor
+identity is inferred. An empty table is a valid zero-row snapshot, distinct from
+a blank line or unreadable input. The parser supports the fixed lowercase hex
+widths, prefixes through 128 and empty or bounded ASCII device names; unsupported
+layouts or names are rejected rather than guessed. No upstream code is imported.
+
+Each checkpoint opens the fixed proc path once and makes one read capped at
+1 MiB plus one overflow-detection byte; parsing allows at most 4096 rows. Both
+original raw and diagnostic fingerprints come from that same byte buffer. New
+baselines retain `ipv6_routes` as the original raw fingerprint and add mandatory
+closed `ipv6_route_metadata` with schema, projection hashes/byte counts and row
+count. Bounded malformed input retains its raw fingerprint plus a fixed rejection
+code with null projections; even two identical rejected snapshots fail. Overflow
+or unreadable input fails capture without pretending a truncated fingerprint is
+a complete original snapshot. Unknown/missing keys, bool/int confusion, invalid
+sizes/digests and inconsistent metadata fail closed. Route bytes, IP addresses,
+interfaces and raw errors are never emitted. Old artifacts do not gain inferred
+metadata and are not adopted as replacement baselines.
+
+The nested baseline diagnostic advances from schema 2 to **3**, retaining both
+original snapshots and adding `ipv6_route_comparison`. It reports raw,
+non-reference, reference-metadata and row-count differences separately; parse
+rejection yields null projection comparisons. The outer finalizer remains schema
+3 and its acceptance predicates stay strict for route hashes: **even
+`REFERENCE_METADATA_ONLY` fails** in normal, quiet, cancellation, incomplete,
+failed and completed-emulator modes. The existing KVM and firewall policies,
+cleanup and 16 KiB evidence bounds are preserved. Source bindings prohibit route
+exceptions and require parse validation before equality. The workflow, pins,
+JNI, Java tests, instrumentation acceptance and execution authority are unchanged.
+
+The inert inventory is **105 existing + 10 new = 115**. New tests cover every
+non-reference field, reference-only changes, row order/count/duplicates, empty
+and malformed layouts, widths/types/bounds, raw-evidence privacy, single-read
+capture and strict rejection across all baseline modes, including both IPv6
+fields being absent from matching snapshots. Independent Sol review found the
+both-fields-absent validation gap; the narrow correction now requires both fields
+before equality. Principal review and all 115 inert tests, the source gate and
+diff checks pass. These are Python mocks and source checks only. An exact-source
+hosted trial remains necessary; this change supplies no new native, Android,
+network, sensor or positioning acceptance and cannot explain the old failure.
+
+### Completed-emulator IPv6 configuration checkpoint candidate
+
+The diagnostic parent remains separate as PR13. Its actual
+[39831818416](https://github.com/VOLPAROSSA/volparossa-map/actions/runs/39831818416)
+tested exact source `5aa77806f3ecda6b5e0d10ac6822cc6fc0f0f29a`, tree
+`ac5fc661485345146760f9880a7b187d4429df54`, and remains **failed**. All eight
+JNI cases completed, registered groups drained and owned state was removed;
+`primary_failure` was null, while `cleanup_errors` was
+`["HOST_BASELINE_UNCONFIRMED"]`. Both the strict baseline and configuration
+acceptance booleans were false. Six IPv6 rows retained different 900-byte raw
+fingerprints, an identical 852-byte non-reference projection with SHA-256
+`651e17ca03aa4e9ab13585696e7641559122820a2ac81b769a32b22290039728`, and
+different 54-byte reference projections. The recomputed classification was
+`REFERENCE_METADATA_ONLY`. Artifact `12449471982` has 99,898 bytes and API/ZIP
+SHA-256 `79554ee10752624dbe4ea31fb91c090ff3090e300bfddbc031f78318d37cbdeb`.
+This observation establishes that trial's projected field difference, without
+identifying an actor or explaining earlier trials. The artifact has no kernel
+identity; this candidate does not retroactively establish its compatibility.
+
+The separate `fix/native-dps-ipv6-configuration-20261022` candidate starts from
+that exact source and retains all original raw and reference fingerprints. Its
+reviewed renderer profile is `linux-6.8-native-seq-v1`. Primary
+[Linux v6.8, exact commit `e8f897f4afef0031fe618a8e94127a0934896aba`](https://kernel.googlesource.com/pub/scm/linux/kernel/git/torvalds/linux/+/e8f897f4afef0031fe618a8e94127a0934896aba/net/ipv6/ip6_fib.c),
+renderer lines 2481–2512, prints metric, `refcount_read(&rt->fib6_ref)`, a
+literal zero use field, flags and device name. The whole source file has SHA-256
+`85d34af1d3fee187c8da53989c3e143ac9b4be2e20f78fe85b8831b07319fdb6` and
+SPDX `GPL-2.0-or-later`; no upstream code is imported. This corrects the earlier
+tag link's line anchor without changing the preserved historical evidence.
+
+The initial compatibility allowlist requires `Linux`, machine `x86_64`, and
+release `6.8.0-<one to six decimal ABI digits>-generic` or `-azure`. Existing
+Ubuntu 24.04 hosted guards still apply. This is an explicitly reviewed upstream
+renderer compatibility assumption plus strict observed-layout validation; it
+does not attest arbitrary downstream patches or the running kernel's complete
+source tree. Other kernel families/flavours require a separately reviewed
+profile. A different family is refused even when its route bytes happen to parse.
+
+One read-only uname capture selects only sysname, release, build/version and
+machine, bounded to 16/128/256/32 printable ASCII characters respectively.
+Hostname and addresses are not captured. `ipv6-renderer-admission.json` retains
+the bounded identity, requested profile, compatibility boolean and a closed
+refusal code. Unsupported identity stops before SDK acquisition or any phase;
+malformed route layout stops after retaining the initial baseline and before
+any phase. Missing/malformed identity cannot authorize acquisition. The initial
+baseline reuses the admitted identity, and later snapshots independently capture
+it again. Complete before/after identity metadata must match exactly and is
+retained as the new `ipv6_renderer` baseline component. The existing single
+bounded route read and parser remain unchanged: at most 1 MiB/4096 rows,
+retaining every other byte, whitespace, row order and duplicate multiplicity.
+
+Only the existing completed-emulator finalizer may select configuration mode.
+It recomputes classifications from the captured raw/projection snapshots; no
+supplied classification grants authority. Only valid `UNCHANGED` or
+`REFERENCE_METADATA_ONLY` projections qualify. `RAW_DIFFERENCE`, non-reference
+changes, inserted/removed/reordered nonidentical rows, invalid metadata and
+unsupported provenance fail. Identical non-reference rows with swapped reference
+values remain indistinguishable in the configuration projection; this grants no
+route identity or actor attribution. Quiet, cancelled, incomplete, failed and
+default comparisons retain raw IPv6 equality. KVM and firewall configuration
+rules and all other baseline predicates remain unchanged.
+
+The schema3 receipt retains `host_routes_dns_firewall_unchanged` as the strict
+KVM/IPv6 verdict under the existing firewall comparison policy. A reference-only
+change therefore leaves it explicitly **false**, even when the separate
+`host_configuration_checkpoint_accepted` is true and the mode is
+`COMPLETED_EMULATOR_CONFIGURATION`. That exception requires all phases, including
+the unchanged eight-test instrumentation acceptance, no primary error, drained
+owned process groups, removed owned state, no cleanup errors and no cancellation.
+Cleanup failure or a deferred signal during capture, configuration comparison or
+the final diagnostic comparison revokes the exception and restores strict mode.
+No second baseline, retry, wait, host write or execution authority is introduced.
+Matching configuration at the two checkpoints does not prove absence of transient
+configuration changes, release of all kernel reference-counted resources, full
+kernel-resource cleanup, or a complete host-baseline restoration.
+
+The inert inventory is **115 existing + 5 new = 120** tests. Existing field,
+row/order/count, malformed/missing metadata and cancellation tests now also cover
+the configuration path. New tests cover supported/unsupported bounded identity,
+hostname exclusion, refusal before phases, identical malformed/missing provenance,
+ambiguous/forged classification and cleanup failure revocation. All 120 tests,
+the source gate and whitespace checks pass locally. These are inert Python/file
+and source checks; no new Android, SDK, native, network, hardware, sensor or
+physical-positioning execution has occurred. Independent review and one exact-source
+hosted component gate precede one actual workflow trial; an unsupported live
+kernel must stop with its identity receipt rather than broaden the profile.
+
+### Separately reviewed Linux 7.0 Azure renderer profile
+
+The first configuration candidate was published as
+`bcba6e111fbe0533765bb6e4c689c8c1598e52f8`, tree
+`26485e9d340187ba896d897023a1f189187fd9d8`, in draft PR14 stacked on the
+diagnostic PR13. Its hosted source gate passed 120 tests and Components passed
+31 tests on that same tree. Actual
+[39840088275](https://github.com/VOLPAROSSA/volparossa-map/actions/runs/39840088275)
+remains **failed**: the admission receipt correctly reports
+`IPV6_RENDERER_UNSUPPORTED` before acquisition. It captured `Linux`, `x86_64`,
+release `7.0.0-1017-azure` and build/version
+`#17~24.04.1-Ubuntu SMP PREEMPT Thu Sep 24 18:46:57 UTC 2026`.
+No KVM open, VM, Android or SDK acquisition ran, and no host baseline was
+captured. This refusal supplies no unchanged-host or completed-workload claim.
+Artifact `12452513438` has SHA-256
+`eff4afa03e9a2c221e70aa03d82cfc0678f0217221f61dd3d08110c59d1a818e`.
+The original failed run is not relabeled by this follow-up.
+
+Before adding support, primary
+[Linux v7.0 tag provenance](https://kernel.googlesource.com/pub/scm/linux/kernel/git/torvalds/linux/+/refs/tags/v7.0)
+was resolved to exact commit `028ef9c96e96197026887c0f092424679298aae8`
+(tag object `3131ff5a117498bb4b9db3a238bb311cbf8383ce`). Its
+[`net/ipv6/ip6_fib.c`](https://kernel.googlesource.com/pub/scm/linux/kernel/git/torvalds/linux/+/028ef9c96e96197026887c0f092424679298aae8/net/ipv6/ip6_fib.c)
+contains 67,591 bytes, SHA-256
+`05b965a73f3e07dd110530a751e847ebb1314cb6bd574a5050d9e130bc8e8dc8`,
+SPDX `GPL-2.0-or-later`. The complete `ipv6_route_native_seq_show` function,
+lines 2608–2639, is byte-identical to the reviewed Linux v6.8 function at
+`e8f897f4afef0031fe618a8e94127a0934896aba`, lines 2481–2512. Both exact function
+slices, from the `static int` declaration through the closing brace without its
+following newline, have SHA-256
+`93ca160d4d293117f2064e48065d5d6b75956d177744cf0a5ea2fdbd518ab120`.
+The projected column still comes from the same reference-count expression;
+metric, literal-zero use, flags, device, and all other renderer bytes match.
+
+The selected field's semantics were checked independently in both exact commits:
+`fib6_ref` remains a `refcount_t`, and the complete `refcount_read` inline helper
+still returns the atomic read of its `refs` member with the same unsigned return
+type. At Linux v7.0,
+[`include/net/ip6_fib.h`](https://kernel.googlesource.com/pub/scm/linux/kernel/git/torvalds/linux/+/028ef9c96e96197026887c0f092424679298aae8/include/net/ip6_fib.h)
+has 18,000 bytes, SHA-256
+`65bd82ba5e84edff783d2113197043c15f47e39465ab02498cc126cd03475e4d`,
+SPDX `GPL-2.0-or-later`; its field declaration is at line 174.
+[`include/linux/refcount.h`](https://kernel.googlesource.com/pub/scm/linux/kernel/git/torvalds/linux/+/028ef9c96e96197026887c0f092424679298aae8/include/linux/refcount.h)
+has 16,824 bytes, SHA-256
+`230147d970f39dcb8efc3304fe9e6b775c206746bf6ba9b957afaabfd565bc5a`,
+SPDX `GPL-2.0`, with that helper at lines 168–171. No upstream code is imported.
+These primary-source comparisons establish upstream renderer compatibility;
+they do not verify Ubuntu Azure's downstream patch lineage or attest the
+running kernel's full source tree. Earlier runs with missing identity retain
+their original unknown-kernel limitation.
+
+The separate profile is `linux-7.0-azure-native-seq-v1`, matching only Linux
+x86_64 release `7.0.0-<one to six decimal ABI digits>-azure` under the existing
+Ubuntu 24.04 hosted guards. The original `linux-6.8-native-seq-v1` remains
+unchanged. There is no generic Linux 7.0, other patch/minor version, arbitrary
+kernel or wildcard-version allowance. Capture selects only a reviewed matching
+profile; validation independently binds the supplied profile to that exact
+release family. A crossed profile/release pairing or unsupported identity fails
+closed, even if bytes happen to parse. The source gate binds the exact two-entry
+profile allowlist. Metadata bounds, missing-input refusal, strict observed-layout
+validation, raw/reference fingerprints and every completed-only cleanup,
+cancellation and configuration predicate remain unchanged.
+
+The inert inventory is **120 existing + 2 new = 122** tests. The existing capture
+matrix now covers both reviewed profiles and nearby refused releases; the new
+tests reject crossed families, unreviewed profiles, non-Azure Linux 7.0,
+architecture/type/bound errors and exercise Linux 7.0 raw-false/configuration-true
+receipts, strict quiet/cancelled/incomplete/failed cases and cancellation during
+capture, configuration comparison and final diagnostic comparison. All 122 tests,
+the source gate and whitespace checks pass locally. This is a source/profile
+change, with no local native/SDK/Android/network execution and no new actual
+workload acceptance. Independent review and the existing hosted source gate must
+precede one exact-source actual trial; configuration acceptance remains distinct
+from full transient-state or kernel-resource cleanup.
+
+### Separately reviewed Linux 6.17 Azure renderer profile
+
+The 122-test candidate at source `65a08400c5288264429c13c760b9f51fc358af35`,
+tree `0596a921c288524abe15474519ccc70057a389a5`, still has no accepted actual
+workload. Actual
+[39841843563](https://github.com/VOLPAROSSA/volparossa-map/actions/runs/39841843563)
+remains **failed** at `IPV6_RENDERER_UNSUPPORTED`, before acquisition, for
+`Linux`, `x86_64`, release `6.17.0-1022-azure`. Its preceding 122-test source
+gate passes, but this refusal supplies no runtime, Android, host-baseline or
+unchanged-host evidence. The failed verdict is preserved by this follow-up.
+
+Primary [Linux v6.17 at exact commit
+`e5f0a698b34ed76002dc5cff3804a61c80233a7a`](https://kernel.googlesource.com/pub/scm/linux/kernel/git/torvalds/linux/+/e5f0a698b34ed76002dc5cff3804a61c80233a7a/net/ipv6/ip6_fib.c)
+has a 66,828-byte `net/ipv6/ip6_fib.c`, SHA-256
+`45d20b9c0713d7173909424b760e0ddd1e7ae9aae8e9f9f735bee9f26f9ba5a2`,
+SPDX `GPL-2.0-or-later`. Its complete `ipv6_route_native_seq_show`, lines
+2586–2617, is byte-identical to the separately reviewed v6.8 and v7.0 functions.
+The exact 918-byte slice, from the `static int` declaration through the closing
+brace without its following newline, has SHA-256
+`93ca160d4d293117f2064e48065d5d6b75956d177744cf0a5ea2fdbd518ab120`.
+The reference column remains `refcount_read(&rt->fib6_ref)`; every other
+renderer byte, including metric, literal-zero use, flags and device, matches.
+
+At that same v6.17 commit,
+[`include/net/ip6_fib.h`](https://kernel.googlesource.com/pub/scm/linux/kernel/git/torvalds/linux/+/e5f0a698b34ed76002dc5cff3804a61c80233a7a/include/net/ip6_fib.h)
+has 17,520 bytes, SHA-256
+`eb7172d8d13d70e0a534ec53bcc1d5667868cd3cb01951b16eaa37e11da3c971`,
+SPDX `GPL-2.0-or-later`; line 174 still declares `fib6_ref` as `refcount_t`.
+[`include/linux/refcount.h`](https://kernel.googlesource.com/pub/scm/linux/kernel/git/torvalds/linux/+/e5f0a698b34ed76002dc5cff3804a61c80233a7a/include/linux/refcount.h)
+has 16,806 bytes, SHA-256
+`138348cedf2dd2ee4bb5defb880c575db997dab0561abdd805534d83750dca80`,
+SPDX `GPL-2.0`. Its complete `refcount_read` helper, lines 168–171, matches
+the reviewed v6.8/v7.0 helper and returns the unsigned atomic read of `refs`.
+No upstream code is imported. These source comparisons support upstream
+renderer compatibility; Ubuntu Azure's vendor patch lineage remains
+**unverified**, and neither the profile nor uname attests the running kernel's
+complete source tree.
+
+The new profile `linux-6.17-azure-native-seq-v1` matches only Linux x86_64
+release `6.17.0-<one to six decimal ABI digits>-azure`, under the existing
+Ubuntu 24.04 hosted guards. The source gate binds all three exact profile
+entries. Other flavours, patch/minor versions, generic Linux 6.17, crossed
+profile/release pairs and arbitrary version patterns remain refused. The
+existing profiles, strict observed-layout parser, bounded identity capture,
+raw/reference fingerprints, non-reference projection, single initial capture,
+acquisition boundary and all workload-completion, cancellation, identity,
+cleanup and other host-baseline requirements retain their existing behavior.
+
+The inert inventory is **122 existing + 2 new = 124** tests. The capture matrix
+now covers selection/refusal for Linux 6.17. New focused tests reject crossed
+families, nearby releases, ABI-length/ASCII bounds, unreviewed profiles and
+invalid identity, and exercise Linux 6.17 raw-false/configuration-true receipts,
+strict quiet/cancelled/incomplete/failed comparisons and cancellation during
+capture, configuration comparison and final diagnostic comparison. Source-gate
+mutation checks reject wildcard, flavour, patch and minor-version broadening.
+All 124 tests, source bindings, Python syntax and whitespace checks pass locally.
+These are inert Python/file and source checks; no native build, SDK acquisition,
+Android, network or physical-positioning execution was performed. Independent
+review and an exact-source hosted source gate precede any separately authorized
+actual trial. Source compatibility does not establish actual workload, privacy,
+host-baseline or full kernel-resource cleanup acceptance.

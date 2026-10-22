@@ -1,6 +1,6 @@
 ![VOLPAROSSA Map banner with a fox formed from golden topographic contours and mountain trails](docs/assets/banner-volparossa-map.png)
 
-# Project VOLPAROSSA Map
+# VOLPAROSSA Map
 
 **Keep the offline map. Add useful road conditions, without publishing your trip.**
 

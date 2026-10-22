@@ -48,6 +48,13 @@ def kvm_configuration_bindings(parsed):
 
 def ipv6_diagnostic_bindings(parsed):
     functions = {node.name: node for node in parsed.body if isinstance(node, ast.FunctionDef)}
+    profiles = [node.value for node in parsed.body if isinstance(node, ast.Assign)
+                and any(isinstance(target, ast.Name) and target.id == "IPV6_ROUTE_RENDERER_PROFILES"
+                        for target in node.targets)]
+    require(len(profiles) == 1 and ast.literal_eval(profiles[0]) == {
+        "linux-6.8-native-seq-v1": r"6\.8\.0-[0-9]{1,6}-(?:generic|azure)",
+        "linux-7.0-azure-native-seq-v1": r"7\.0\.0-[0-9]{1,6}-azure",
+    }, "IPV6_REVIEWED_RENDERER_PROFILES")
     baseline = functions["baseline_unchanged"]
     ignored = [node.value for node in baseline.body if isinstance(node, ast.Assign)
                and any(isinstance(target, ast.Name) and target.id == "ignored" for target in node.targets)]

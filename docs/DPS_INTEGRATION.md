@@ -1344,3 +1344,78 @@ and source checks; no new Android, SDK, native, network, hardware, sensor or
 physical-positioning execution has occurred. Independent review and one exact-source
 hosted component gate precede one actual workflow trial; an unsupported live
 kernel must stop with its identity receipt rather than broaden the profile.
+
+### Separately reviewed Linux 7.0 Azure renderer profile
+
+The first configuration candidate was published as
+`bcba6e111fbe0533765bb6e4c689c8c1598e52f8`, tree
+`26485e9d340187ba896d897023a1f189187fd9d8`, in draft PR14 stacked on the
+diagnostic PR13. Its hosted source gate passed 120 tests and Components passed
+31 tests on that same tree. Actual
+[39840088275](https://github.com/VOLPAROSSA/volparossa-map/actions/runs/39840088275)
+remains **failed**: the admission receipt correctly reports
+`IPV6_RENDERER_UNSUPPORTED` before acquisition. It captured `Linux`, `x86_64`,
+release `7.0.0-1017-azure` and build/version
+`#17~24.04.1-Ubuntu SMP PREEMPT Thu Sep 24 18:46:57 UTC 2026`.
+No KVM open, VM, Android or SDK acquisition ran, and no host baseline was
+captured. This refusal supplies no unchanged-host or completed-workload claim.
+Artifact `12452513438` has SHA-256
+`eff4afa03e9a2c221e70aa03d82cfc0678f0217221f61dd3d08110c59d1a818e`.
+The original failed run is not relabeled by this follow-up.
+
+Before adding support, primary
+[Linux v7.0 tag provenance](https://kernel.googlesource.com/pub/scm/linux/kernel/git/torvalds/linux/+/refs/tags/v7.0)
+was resolved to exact commit `028ef9c96e96197026887c0f092424679298aae8`
+(tag object `3131ff5a117498bb4b9db3a238bb311cbf8383ce`). Its
+[`net/ipv6/ip6_fib.c`](https://kernel.googlesource.com/pub/scm/linux/kernel/git/torvalds/linux/+/028ef9c96e96197026887c0f092424679298aae8/net/ipv6/ip6_fib.c)
+contains 67,591 bytes, SHA-256
+`05b965a73f3e07dd110530a751e847ebb1314cb6bd574a5050d9e130bc8e8dc8`,
+SPDX `GPL-2.0-or-later`. The complete `ipv6_route_native_seq_show` function,
+lines 2608–2639, is byte-identical to the reviewed Linux v6.8 function at
+`e8f897f4afef0031fe618a8e94127a0934896aba`, lines 2481–2512. Both exact function
+slices, from the `static int` declaration through the closing brace without its
+following newline, have SHA-256
+`93ca160d4d293117f2064e48065d5d6b75956d177744cf0a5ea2fdbd518ab120`.
+The projected column still comes from the same reference-count expression;
+metric, literal-zero use, flags, device, and all other renderer bytes match.
+
+The selected field's semantics were checked independently in both exact commits:
+`fib6_ref` remains a `refcount_t`, and the complete `refcount_read` inline helper
+still returns the atomic read of its `refs` member with the same unsigned return
+type. At Linux v7.0,
+[`include/net/ip6_fib.h`](https://kernel.googlesource.com/pub/scm/linux/kernel/git/torvalds/linux/+/028ef9c96e96197026887c0f092424679298aae8/include/net/ip6_fib.h)
+has 18,000 bytes, SHA-256
+`65bd82ba5e84edff783d2113197043c15f47e39465ab02498cc126cd03475e4d`,
+SPDX `GPL-2.0-or-later`; its field declaration is at line 174.
+[`include/linux/refcount.h`](https://kernel.googlesource.com/pub/scm/linux/kernel/git/torvalds/linux/+/028ef9c96e96197026887c0f092424679298aae8/include/linux/refcount.h)
+has 16,824 bytes, SHA-256
+`230147d970f39dcb8efc3304fe9e6b775c206746bf6ba9b957afaabfd565bc5a`,
+SPDX `GPL-2.0`, with that helper at lines 168–171. No upstream code is imported.
+These primary-source comparisons establish upstream renderer compatibility;
+they do not verify Ubuntu Azure's downstream patch lineage or attest the
+running kernel's full source tree. Earlier runs with missing identity retain
+their original unknown-kernel limitation.
+
+The separate profile is `linux-7.0-azure-native-seq-v1`, matching only Linux
+x86_64 release `7.0.0-<one to six decimal ABI digits>-azure` under the existing
+Ubuntu 24.04 hosted guards. The original `linux-6.8-native-seq-v1` remains
+unchanged. There is no generic Linux 7.0, other patch/minor version, arbitrary
+kernel or wildcard-version allowance. Capture selects only a reviewed matching
+profile; validation independently binds the supplied profile to that exact
+release family. A crossed profile/release pairing or unsupported identity fails
+closed, even if bytes happen to parse. The source gate binds the exact two-entry
+profile allowlist. Metadata bounds, missing-input refusal, strict observed-layout
+validation, raw/reference fingerprints and every completed-only cleanup,
+cancellation and configuration predicate remain unchanged.
+
+The inert inventory is **120 existing + 2 new = 122** tests. The existing capture
+matrix now covers both reviewed profiles and nearby refused releases; the new
+tests reject crossed families, unreviewed profiles, non-Azure Linux 7.0,
+architecture/type/bound errors and exercise Linux 7.0 raw-false/configuration-true
+receipts, strict quiet/cancelled/incomplete/failed cases and cancellation during
+capture, configuration comparison and final diagnostic comparison. All 122 tests,
+the source gate and whitespace checks pass locally. This is a source/profile
+change, with no local native/SDK/Android/network execution and no new actual
+workload acceptance. Independent review and the existing hosted source gate must
+precede one exact-source actual trial; configuration acceptance remains distinct
+from full transient-state or kernel-resource cleanup.

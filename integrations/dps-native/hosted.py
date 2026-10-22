@@ -35,6 +35,10 @@ KVM_PHASES = ("kvm-probe", "emulator")
 IPV6_ROUTE_BYTES = 1024**2
 IPV6_ROUTE_ROWS = 4096
 IPV6_ROUTE_RENDERER_PROFILE = "linux-6.8-native-seq-v1"
+IPV6_ROUTE_RENDERER_PROFILES = {
+    "linux-6.8-native-seq-v1": r"6\.8\.0-[0-9]{1,6}-(?:generic|azure)",
+    "linux-7.0-azure-native-seq-v1": r"7\.0\.0-[0-9]{1,6}-azure",
+}
 
 
 def guards(env):
@@ -611,7 +615,7 @@ def validate_ipv6_renderer(value, *, supported=True):
     require(type(supported) is bool, "IPV6_RENDERER_METADATA_SHAPE")
     require(type(value) is dict and set(value) == {"schema", "profile", "kernel"}
             and type(value["schema"]) is int and value["schema"] == 1
-            and type(value["profile"]) is str and value["profile"] == IPV6_ROUTE_RENDERER_PROFILE,
+            and type(value["profile"]) is str and value["profile"] in IPV6_ROUTE_RENDERER_PROFILES,
             "IPV6_RENDERER_METADATA_SHAPE")
     kernel = value["kernel"]
     require(type(kernel) is dict and set(kernel) == {"sysname", "release", "version", "machine"}
@@ -621,7 +625,7 @@ def validate_ipv6_renderer(value, *, supported=True):
             "IPV6_RENDERER_METADATA_SHAPE")
     if supported:
         require(kernel["sysname"] == "Linux" and kernel["machine"] == "x86_64"
-                and re.fullmatch(r"6\.8\.0-[0-9]{1,6}-(?:generic|azure)", kernel["release"]),
+                and re.fullmatch(IPV6_ROUTE_RENDERER_PROFILES[value["profile"]], kernel["release"]),
                 "IPV6_RENDERER_UNSUPPORTED")
 
 
@@ -632,6 +636,10 @@ def ipv6_renderer_snapshot():
     value = dict(schema=1, profile=IPV6_ROUTE_RENDERER_PROFILE,
                  kernel={key: getattr(identity, key) for key in ("sysname", "release", "version", "machine")})
     validate_ipv6_renderer(value, supported=False)
+    # Select only an explicitly reviewed release/profile pairing. Unknown
+    # releases retain the original requested profile and still fail admission.
+    value["profile"] = next((profile for profile, release in IPV6_ROUTE_RENDERER_PROFILES.items()
+                             if re.fullmatch(release, value["kernel"]["release"])), IPV6_ROUTE_RENDERER_PROFILE)
     return value
 
 
@@ -654,7 +662,7 @@ def ipv6_renderer_admission(state):
 def ipv6_route_snapshot(raw):
     """Hash one bounded proc snapshot; only the reference-count bytes are split.
 
-    Layout: Linux v6.8 net/ipv6/ip6_fib.c ipv6_route_native_seq_show.
+    Layout: reviewed Linux v6.8/v7.0 ipv6_route_native_seq_show, byte-identical.
     Projections alone grant no acceptance; the finalizer also requires the
     independently captured reviewed renderer identity and completed workload.
     Empty tables are valid. Duplicate rows and their order remain significant.

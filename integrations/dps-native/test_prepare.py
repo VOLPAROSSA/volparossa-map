@@ -2179,6 +2179,8 @@ class Ipv6RouteDiagnosticTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             state = Path(directory)
             for release, compatible in (("6.8.0-1001-azure", True), ("6.8.0-99-generic", True),
+                    ("6.17.0-1022-azure", True), ("6.17.0-1022-generic", False),
+                    ("6.17.1-1022-azure", False), ("6.18.0-1022-azure", False),
                     ("7.0.0-1017-azure", True), ("7.0.0-1017-generic", False),
                     ("7.0.1-1017-azure", False), ("7.1.0-1017-azure", False),
                     ("6.14.0-1018-azure", False), ("6.8.1-custom", False), ("6.8.0-99-lowlatency", False)):
@@ -2194,8 +2196,10 @@ class Ipv6RouteDiagnosticTests(unittest.TestCase):
                 receipt = json.loads((state / "ipv6-renderer-admission.json").read_text())
                 self.assertEqual(receipt["compatible"], compatible)
                 self.assertEqual(receipt["snapshot"]["kernel"], vars(identity))
-                self.assertEqual(receipt["snapshot"]["profile"], "linux-7.0-azure-native-seq-v1"
-                                 if release == "7.0.0-1017-azure" else H.IPV6_ROUTE_RENDERER_PROFILE)
+                self.assertEqual(receipt["snapshot"]["profile"], {
+                    "6.17.0-1022-azure": "linux-6.17-azure-native-seq-v1",
+                    "7.0.0-1017-azure": "linux-7.0-azure-native-seq-v1",
+                }.get(release, H.IPV6_ROUTE_RENDERER_PROFILE))
                 self.assertEqual(receipt["code"], None if compatible else "IPV6_RENDERER_UNSUPPORTED")
                 self.assertEqual(set(receipt["snapshot"]["kernel"]), {"sysname", "release", "version", "machine"})
                 self.assertLess(len(json.dumps(receipt)), 1024)
@@ -2246,6 +2250,54 @@ class Ipv6RouteDiagnosticTests(unittest.TestCase):
             self.assertEqual(result["baseline_comparison"]["after"], self.after)
         # Reuse the existing cancellation timing matrix under the new identity:
         # capture, configuration comparison and final diagnostic comparison.
+        self.life.first_signal = None
+        KvmConfigurationTests.test_cancellation_during_capture_or_after_comparison_revokes_configuration_mode(self)
+
+    def test_linux617_profile_rejects_crossed_families_near_releases_and_invalid_identity(self):
+        azure = inert_ipv6_renderer()
+        azure["profile"] = "linux-6.17-azure-native-seq-v1"
+        for release in ("6.17.0-1-azure", "6.17.0-1022-azure", "6.17.0-999999-azure"):
+            azure["kernel"]["release"] = release
+            H.validate_ipv6_renderer(azure)
+        for profile, release in ((azure["profile"], "6.8.0-1001-azure"),
+                (azure["profile"], "7.0.0-1017-azure"),
+                (H.IPV6_ROUTE_RENDERER_PROFILE, "6.17.0-1022-azure"),
+                ("linux-7.0-azure-native-seq-v1", "6.17.0-1022-azure")):
+            metadata = copy.deepcopy(azure); metadata["profile"] = profile; metadata["kernel"]["release"] = release
+            with self.subTest(profile=profile, release=release), self.assertRaisesRegex(ValueError, "^IPV6_RENDERER_UNSUPPORTED$"):
+                H.validate_ipv6_renderer(metadata)
+        for release in ("6.17.0-1022-generic", "6.17.0-1022-lowlatency", "6.17.1-1022-azure",
+                "6.16.0-1022-azure", "6.18.0-1022-azure", "6.17.0-1022-azure-extra",
+                "6.17.0-1000000-azure", "6.17.0--azure", "6.17.0-azure", "6.17.0-１２３-azure"):
+            metadata = copy.deepcopy(azure); metadata["kernel"]["release"] = release
+            with self.subTest(release=release), self.assertRaises(ValueError): H.validate_ipv6_renderer(metadata)
+        for key, value in (("machine", "aarch64"), ("sysname", "FreeBSD"),
+                ("release", "6.17.0-1022-azure\n"), ("version", "x" * 257), ("machine", True)):
+            metadata = copy.deepcopy(azure); metadata["kernel"][key] = value
+            with self.subTest(key=key, value=value), self.assertRaises(ValueError): H.validate_ipv6_renderer(metadata)
+        for profile in ("linux-6-native-seq-v1", "linux-6.17-native-seq-v1", None, True):
+            with self.subTest(profile=profile), self.assertRaisesRegex(ValueError, "^IPV6_RENDERER_METADATA_SHAPE$"):
+                H.validate_ipv6_renderer(dict(azure, profile=profile))
+
+    def test_linux617_profile_preserves_raw_strict_and_completed_only_cancellation_boundaries(self):
+        KvmConfigurationTests.setUp(self)
+        self.state = lambda: KvmConfigurationTests.state(self)
+        for value in (self.before, self.after):
+            value["ipv6_renderer"]["profile"] = "linux-6.17-azure-native-seq-v1"
+            value["ipv6_renderer"]["kernel"]["release"] = "6.17.0-1022-azure"
+        reference = H.ipv6_route_snapshot(inert_ipv6_route(reference="00000002"))
+        self.after.update(ipv6_routes=reference["raw"], ipv6_route_metadata=reference["metadata"])
+        for mode in ("completed", "quiet", "cancel", "incomplete", "failed"):
+            self.life.first_signal = H.signal.SIGTERM if mode == "cancel" else None
+            result = KvmConfigurationTests.finalize(self, complete=mode != "incomplete",
+                original=ValueError("ORIGINAL_FAILURE") if mode == "failed" else None,
+                control_mode="quiet" if mode == "quiet" else None)
+            accepted = mode == "completed"
+            self.assertEqual(result["success"], accepted)
+            self.assertFalse(result["host_routes_dns_firewall_unchanged"])
+            self.assertEqual(result["host_configuration_checkpoint_accepted"], accepted)
+            self.assertEqual(result["baseline_comparison"]["before"], self.before)
+            self.assertEqual(result["baseline_comparison"]["after"], self.after)
         self.life.first_signal = None
         KvmConfigurationTests.test_cancellation_during_capture_or_after_comparison_revokes_configuration_mode(self)
 
@@ -2355,6 +2407,10 @@ class Ipv6RouteDiagnosticTests(unittest.TestCase):
             source.replace('("UNCHANGED", "REFERENCE_METADATA_ONLY")', '("UNCHANGED", "REFERENCE_METADATA_ONLY", "RAW_DIFFERENCE")'),
             source.replace('renderer = ipv6_renderer_admission(state)', 'renderer = ignored_admission(state)'),
             source.replace('validate_ipv6_renderer(value["ipv6_renderer"])', 'validate_ipv6_renderer(value["ipv6_renderer"], supported=False)'),
+            source.replace('r"6\\.17\\.0-[0-9]{1,6}-azure"', 'r".*"'),
+            source.replace('r"6\\.17\\.0-[0-9]{1,6}-azure"', 'r"6\\.17\\.0-[0-9]{1,6}-(?:generic|azure)"'),
+            source.replace('r"6\\.17\\.0-[0-9]{1,6}-azure"', 'r"6\\.17\\.[0-9]+-[0-9]{1,6}-azure"'),
+            source.replace('r"6\\.17\\.0-[0-9]{1,6}-azure"', 'r"6\\.[0-9]+\\.0-[0-9]{1,6}-azure"'),
             source.replace('r"7\\.0\\.0-[0-9]{1,6}-azure"', 'r".*"'),
             source.replace('r"7\\.0\\.0-[0-9]{1,6}-azure"', 'r"7\\.0\\.0-[0-9]{1,6}-(?:generic|azure)"')):
             with self.assertRaises(ValueError): S.ipv6_diagnostic_bindings(ast.parse(mutation))

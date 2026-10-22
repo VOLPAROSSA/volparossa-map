@@ -37,6 +37,7 @@ IPV6_ROUTE_ROWS = 4096
 IPV6_ROUTE_RENDERER_PROFILE = "linux-6.8-native-seq-v1"
 IPV6_ROUTE_RENDERER_PROFILES = {
     "linux-6.8-native-seq-v1": r"6\.8\.0-[0-9]{1,6}-(?:generic|azure)",
+    "linux-6.17-azure-native-seq-v1": r"6\.17\.0-[0-9]{1,6}-azure",
     "linux-7.0-azure-native-seq-v1": r"7\.0\.0-[0-9]{1,6}-azure",
 }
 
@@ -662,7 +663,7 @@ def ipv6_renderer_admission(state):
 def ipv6_route_snapshot(raw):
     """Hash one bounded proc snapshot; only the reference-count bytes are split.
 
-    Layout: reviewed Linux v6.8/v7.0 ipv6_route_native_seq_show, byte-identical.
+    Layout: reviewed Linux v6.8/v6.17/v7.0 ipv6_route_native_seq_show, byte-identical.
     Projections alone grant no acceptance; the finalizer also requires the
     independently captured reviewed renderer identity and completed workload.
     Empty tables are valid. Duplicate rows and their order remain significant.

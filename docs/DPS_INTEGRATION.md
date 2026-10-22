@@ -1419,3 +1419,65 @@ change, with no local native/SDK/Android/network execution and no new actual
 workload acceptance. Independent review and the existing hosted source gate must
 precede one exact-source actual trial; configuration acceptance remains distinct
 from full transient-state or kernel-resource cleanup.
+
+### Separately reviewed Linux 6.17 Azure renderer profile
+
+The 122-test candidate at source `65a08400c5288264429c13c760b9f51fc358af35`,
+tree `0596a921c288524abe15474519ccc70057a389a5`, still has no accepted actual
+workload. Actual
+[39841843563](https://github.com/VOLPAROSSA/volparossa-map/actions/runs/39841843563)
+remains **failed** at `IPV6_RENDERER_UNSUPPORTED`, before acquisition, for
+`Linux`, `x86_64`, release `6.17.0-1022-azure`. Its preceding 122-test source
+gate passes, but this refusal supplies no runtime, Android, host-baseline or
+unchanged-host evidence. The failed verdict is preserved by this follow-up.
+
+Primary [Linux v6.17 at exact commit
+`e5f0a698b34ed76002dc5cff3804a61c80233a7a`](https://kernel.googlesource.com/pub/scm/linux/kernel/git/torvalds/linux/+/e5f0a698b34ed76002dc5cff3804a61c80233a7a/net/ipv6/ip6_fib.c)
+has a 66,828-byte `net/ipv6/ip6_fib.c`, SHA-256
+`45d20b9c0713d7173909424b760e0ddd1e7ae9aae8e9f9f735bee9f26f9ba5a2`,
+SPDX `GPL-2.0-or-later`. Its complete `ipv6_route_native_seq_show`, lines
+2586–2617, is byte-identical to the separately reviewed v6.8 and v7.0 functions.
+The exact 918-byte slice, from the `static int` declaration through the closing
+brace without its following newline, has SHA-256
+`93ca160d4d293117f2064e48065d5d6b75956d177744cf0a5ea2fdbd518ab120`.
+The reference column remains `refcount_read(&rt->fib6_ref)`; every other
+renderer byte, including metric, literal-zero use, flags and device, matches.
+
+At that same v6.17 commit,
+[`include/net/ip6_fib.h`](https://kernel.googlesource.com/pub/scm/linux/kernel/git/torvalds/linux/+/e5f0a698b34ed76002dc5cff3804a61c80233a7a/include/net/ip6_fib.h)
+has 17,520 bytes, SHA-256
+`eb7172d8d13d70e0a534ec53bcc1d5667868cd3cb01951b16eaa37e11da3c971`,
+SPDX `GPL-2.0-or-later`; line 174 still declares `fib6_ref` as `refcount_t`.
+[`include/linux/refcount.h`](https://kernel.googlesource.com/pub/scm/linux/kernel/git/torvalds/linux/+/e5f0a698b34ed76002dc5cff3804a61c80233a7a/include/linux/refcount.h)
+has 16,806 bytes, SHA-256
+`138348cedf2dd2ee4bb5defb880c575db997dab0561abdd805534d83750dca80`,
+SPDX `GPL-2.0`. Its complete `refcount_read` helper, lines 168–171, matches
+the reviewed v6.8/v7.0 helper and returns the unsigned atomic read of `refs`.
+No upstream code is imported. These source comparisons support upstream
+renderer compatibility; Ubuntu Azure's vendor patch lineage remains
+**unverified**, and neither the profile nor uname attests the running kernel's
+complete source tree.
+
+The new profile `linux-6.17-azure-native-seq-v1` matches only Linux x86_64
+release `6.17.0-<one to six decimal ABI digits>-azure`, under the existing
+Ubuntu 24.04 hosted guards. The source gate binds all three exact profile
+entries. Other flavours, patch/minor versions, generic Linux 6.17, crossed
+profile/release pairs and arbitrary version patterns remain refused. The
+existing profiles, strict observed-layout parser, bounded identity capture,
+raw/reference fingerprints, non-reference projection, single initial capture,
+acquisition boundary and all workload-completion, cancellation, identity,
+cleanup and other host-baseline requirements retain their existing behavior.
+
+The inert inventory is **122 existing + 2 new = 124** tests. The capture matrix
+now covers selection/refusal for Linux 6.17. New focused tests reject crossed
+families, nearby releases, ABI-length/ASCII bounds, unreviewed profiles and
+invalid identity, and exercise Linux 6.17 raw-false/configuration-true receipts,
+strict quiet/cancelled/incomplete/failed comparisons and cancellation during
+capture, configuration comparison and final diagnostic comparison. Source-gate
+mutation checks reject wildcard, flavour, patch and minor-version broadening.
+All 124 tests, source bindings, Python syntax and whitespace checks pass locally.
+These are inert Python/file and source checks; no native build, SDK acquisition,
+Android, network or physical-positioning execution was performed. Independent
+review and an exact-source hosted source gate precede any separately authorized
+actual trial. Source compatibility does not establish actual workload, privacy,
+host-baseline or full kernel-resource cleanup acceptance.

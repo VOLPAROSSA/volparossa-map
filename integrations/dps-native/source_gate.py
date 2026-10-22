@@ -53,6 +53,7 @@ def ipv6_diagnostic_bindings(parsed):
                         for target in node.targets)]
     require(len(profiles) == 1 and ast.literal_eval(profiles[0]) == {
         "linux-6.8-native-seq-v1": r"6\.8\.0-[0-9]{1,6}-(?:generic|azure)",
+        "linux-6.17-azure-native-seq-v1": r"6\.17\.0-[0-9]{1,6}-azure",
         "linux-7.0-azure-native-seq-v1": r"7\.0\.0-[0-9]{1,6}-azure",
     }, "IPV6_REVIEWED_RENDERER_PROFILES")
     baseline = functions["baseline_unchanged"]

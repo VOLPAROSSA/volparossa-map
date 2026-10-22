@@ -1,0 +1,31 @@
+// SPDX-License-Identifier: GPL-3.0-only
+plugins { alias libs.plugins.android.library }
+
+android {
+    namespace = 'org.volparossa.map.dps'
+    compileSdk = 36
+    ndkVersion = '29.0.14206865'
+    defaultConfig {
+        minSdk = 21
+        targetSdk = 36
+        testInstrumentationRunner = 'androidx.test.runner.AndroidJUnitRunner'
+        ndk { abiFilters 'x86_64' }
+        externalNativeBuild {
+            cmake { arguments '-DANDROID_STL=none' }
+        }
+        consumerProguardFiles 'consumer-rules.pro'
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    externalNativeBuild {
+        cmake { path file('src/main/cpp/CMakeLists.txt'); version '3.22.1' }
+    }
+    testOptions { animationsDisabled = true }
+}
+
+dependencies {
+    androidTestImplementation libs.androidx.junit
+    androidTestImplementation libs.androidx.test.runner
+}

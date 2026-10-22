@@ -32,6 +32,14 @@ KVM = Path("/dev/kvm")
 KVM_GET_API_VERSION = 0xAE00  # Linux UAPI _IO(KVMIO, 0x00), system query only.
 PHASES = ("kvm-probe", "public-build", "offline-build", "emulator")
 KVM_PHASES = ("kvm-probe", "emulator")
+IPV6_ROUTE_BYTES = 1024**2
+IPV6_ROUTE_ROWS = 4096
+IPV6_ROUTE_RENDERER_PROFILE = "linux-6.8-native-seq-v1"
+IPV6_ROUTE_RENDERER_PROFILES = {
+    "linux-6.8-native-seq-v1": r"6\.8\.0-[0-9]{1,6}-(?:generic|azure)",
+    "linux-6.17-azure-native-seq-v1": r"6\.17\.0-[0-9]{1,6}-azure",
+    "linux-7.0-azure-native-seq-v1": r"7\.0\.0-[0-9]{1,6}-azure",
+}
 
 
 def guards(env):
@@ -119,6 +127,33 @@ def kvm_snapshot():
     except OSError as error:
         raise KvmFailure("KVM_DEVICE_CHANGED", error.errno) from None
     return result
+
+
+def kvm_comparison(before, after):
+    """Closed checkpoint comparison; raw snapshots are never rewritten."""
+    device_fields = {"dev", "ino", "rdev", "mode", "uid", "gid", "nlink", "mtime_ns", "ctime_ns"}
+    for value in (before, after):
+        require(type(value) is dict and set(value) == {"device", "acl", "kvm_gid"}, "KVM_METADATA_SHAPE")
+        device, acl = value["device"], value["acl"]
+        require(type(device) is dict and set(device) == device_fields, "KVM_METADATA_SHAPE")
+        require(all(type(device[key]) is int and 0 <= device[key] < 2**64 for key in device_fields - {"mtime_ns", "ctime_ns"})
+                and all(type(device[key]) is int and -2**63 <= device[key] < 2**64 for key in ("mtime_ns", "ctime_ns")),
+                "KVM_METADATA_SHAPE")
+        require(device["mode"] < 2**16 and stat.S_ISCHR(device["mode"])
+                and (os.major(device["rdev"]), os.minor(device["rdev"])) == (10, 232)
+                and device["uid"] < 2**32 and device["gid"] < 2**32 and device["nlink"] > 0,
+                "KVM_METADATA_SHAPE")
+        require(type(value["kvm_gid"]) is int and 0 < value["kvm_gid"] < 2**32
+                and value["kvm_gid"] == device["gid"], "KVM_METADATA_SHAPE")
+        require(type(acl) is dict and ((set(acl) == {"present"} and acl["present"] is False) or
+                (set(acl) == {"present", "bytes", "sha256"} and acl["present"] is True
+                 and type(acl["bytes"]) is int and 0 <= acl["bytes"] <= 4096
+                 and type(acl["sha256"]) is str and re.fullmatch("[0-9a-f]{64}", acl["sha256"]))), "KVM_METADATA_SHAPE")
+    raw_unchanged = before == after
+    configuration_unchanged = (before["acl"] == after["acl"] and before["kvm_gid"] == after["kvm_gid"]
+        and all(before["device"][key] == after["device"][key] for key in device_fields - {"mtime_ns", "ctime_ns"}))
+    return dict(classification="UNCHANGED" if raw_unchanged else "TIMESTAMPS_ONLY" if configuration_unchanged
+                else "CONFIGURATION_DIFFERENCE", raw_unchanged=raw_unchanged, configuration_unchanged=configuration_unchanged)
 
 
 def kvm_admission(state):
@@ -576,21 +611,174 @@ def firewall_comparison(before, after):
                 config_changed=config_changed, counters_changed=counters_changed)
 
 
-def baseline_unchanged(before, after):
+def validate_ipv6_renderer(value, *, supported=True):
+    """Reviewed layout identity, not proof of the running kernel's source tree."""
+    require(type(supported) is bool, "IPV6_RENDERER_METADATA_SHAPE")
+    require(type(value) is dict and set(value) == {"schema", "profile", "kernel"}
+            and type(value["schema"]) is int and value["schema"] == 1
+            and type(value["profile"]) is str and value["profile"] in IPV6_ROUTE_RENDERER_PROFILES,
+            "IPV6_RENDERER_METADATA_SHAPE")
+    kernel = value["kernel"]
+    require(type(kernel) is dict and set(kernel) == {"sysname", "release", "version", "machine"}
+            and all(type(kernel[key]) is str and 0 < len(kernel[key]) <= bound
+                    and re.fullmatch(r"[ -~]+", kernel[key])
+                    for key, bound in (("sysname", 16), ("release", 128), ("version", 256), ("machine", 32))),
+            "IPV6_RENDERER_METADATA_SHAPE")
+    if supported:
+        require(kernel["sysname"] == "Linux" and kernel["machine"] == "x86_64"
+                and re.fullmatch(IPV6_ROUTE_RENDERER_PROFILES[value["profile"]], kernel["release"]),
+                "IPV6_RENDERER_UNSUPPORTED")
+
+
+def ipv6_renderer_snapshot():
+    # Uname's hostname is deliberately neither selected nor retained. No command,
+    # network request, module load or host configuration write is performed.
+    identity = os.uname()
+    value = dict(schema=1, profile=IPV6_ROUTE_RENDERER_PROFILE,
+                 kernel={key: getattr(identity, key) for key in ("sysname", "release", "version", "machine")})
+    validate_ipv6_renderer(value, supported=False)
+    # Select only an explicitly reviewed release/profile pairing. Unknown
+    # releases retain the original requested profile and still fail admission.
+    value["profile"] = next((profile for profile, release in IPV6_ROUTE_RENDERER_PROFILES.items()
+                             if re.fullmatch(release, value["kernel"]["release"])), IPV6_ROUTE_RENDERER_PROFILE)
+    return value
+
+
+def ipv6_renderer_admission(state):
+    """Retain bounded identity on refusal, before acquisition or Android starts."""
+    receipt = dict(schema=1, snapshot=None, compatible=False, code=None)
+    try:
+        receipt["snapshot"] = ipv6_renderer_snapshot()
+        validate_ipv6_renderer(receipt["snapshot"])
+        receipt["compatible"] = True
+    except (ValueError, OSError) as error:
+        receipt["code"] = (str(error) if isinstance(error, ValueError) and str(error) in
+            ("IPV6_RENDERER_METADATA_SHAPE", "IPV6_RENDERER_UNSUPPORTED") else "IPV6_RENDERER_CAPTURE_FAILED")
+        raise
+    finally:
+        save(state / "ipv6-renderer-admission.json", receipt)
+    return receipt["snapshot"]
+
+
+def ipv6_route_snapshot(raw):
+    """Hash one bounded proc snapshot; only the reference-count bytes are split.
+
+    Layout: reviewed Linux v6.8/v6.17/v7.0 ipv6_route_native_seq_show, byte-identical.
+    Projections alone grant no acceptance; the finalizer also requires the
+    independently captured reviewed renderer identity and completed workload.
+    Empty tables are valid. Duplicate rows and their order remain significant.
+    """
+    require(type(raw) is bytes and len(raw) <= IPV6_ROUTE_BYTES, "IPV6_ROUTE_BYTES")
+    metadata = dict(schema=1, error=None, non_refcount=None, reference_metadata=None, row_count=None)
+    snapshot = dict(raw=digest(raw), metadata=metadata)
+    try:
+        rows = raw.splitlines(keepends=True)
+        require(len(rows) <= IPV6_ROUTE_ROWS, "IPV6_ROUTE_ROW_BOUND")
+        non_refcount, references = [], []
+        layout = (rb"[0-9a-f]{32} ([0-9a-f]{2}) [0-9a-f]{32} ([0-9a-f]{2}) "
+                  rb"[0-9a-f]{32} [0-9a-f]{8} (?P<reference>[0-9a-f]{8}) "
+                  rb"[0-9a-f]{8} [0-9a-f]{8} (?P<device> *[A-Za-z0-9_.-]{0,15})\n")
+        for row in rows:
+            match = re.fullmatch(layout, row)
+            require(match is not None, "IPV6_ROUTE_ROW_SHAPE")
+            require(all(int(match[index], 16) <= 128 for index in (1, 2)), "IPV6_ROUTE_ROW_SHAPE")
+            device = match["device"].lstrip(b" ")
+            require(device not in (b".", b"..") and match["device"] == device.rjust(8, b" "),
+                    "IPV6_ROUTE_ROW_SHAPE")
+            start, end = match.span("reference")
+            non_refcount.append(row[:start] + row[end:])
+            references.append(match["reference"] + b"\n")
+        metadata.update(non_refcount=digest(b"".join(non_refcount)),
+                        reference_metadata=digest(b"".join(references)), row_count=len(rows))
+    except ValueError as error:
+        # Fixed internal codes only; preserve the raw fingerprint on row rejection.
+        metadata["error"] = "IPV6_ROUTE_ROW_BOUND" if str(error) == "IPV6_ROUTE_ROW_BOUND" else "IPV6_ROUTE_ROW_SHAPE"
+    return snapshot
+
+
+def read_ipv6_route_snapshot():
+    # One bounded read provides both raw and projected fingerprints. No reread,
+    # sorting, deduplication, host route output or unbounded read_bytes allocation.
+    with Path("/proc/net/ipv6_route").open("rb") as source:
+        raw = source.read(IPV6_ROUTE_BYTES + 1)
+    return ipv6_route_snapshot(raw)
+
+
+def ipv6_route_comparison(before, after):
+    """Closed fingerprints only; rejected parses never become valid baselines."""
+    def fingerprint(value, bound):
+        return (type(value) is dict and set(value) == {"bytes", "sha256"}
+                and type(value["bytes"]) is int and 0 <= value["bytes"] <= bound
+                and type(value["sha256"]) is str and re.fullmatch("[0-9a-f]{64}", value["sha256"]) is not None)
+    for value in (before, after):
+        require(type(value) is dict and set(value) == {"raw", "metadata"}
+                and fingerprint(value["raw"], IPV6_ROUTE_BYTES), "IPV6_ROUTE_METADATA_SHAPE")
+        meta = value["metadata"]
+        require(type(meta) is dict and set(meta) == {"schema", "error", "non_refcount", "reference_metadata", "row_count"}
+                and type(meta["schema"]) is int and meta["schema"] == 1, "IPV6_ROUTE_METADATA_SHAPE")
+        if meta["error"] is not None:
+            require(type(meta["error"]) is str and meta["error"] in ("IPV6_ROUTE_ROW_BOUND", "IPV6_ROUTE_ROW_SHAPE")
+                    and all(meta[key] is None for key in ("non_refcount", "reference_metadata", "row_count")),
+                    "IPV6_ROUTE_METADATA_SHAPE")
+        else:
+            require(type(meta["row_count"]) is int and 0 <= meta["row_count"] <= IPV6_ROUTE_ROWS
+                    and fingerprint(meta["non_refcount"], IPV6_ROUTE_BYTES)
+                    and fingerprint(meta["reference_metadata"], IPV6_ROUTE_ROWS * 9)
+                    and meta["reference_metadata"]["bytes"] == meta["row_count"] * 9
+                    and meta["non_refcount"]["bytes"] + meta["row_count"] * 8 == value["raw"]["bytes"],
+                    "IPV6_ROUTE_METADATA_SHAPE")
+    raw_changed = before["raw"] != after["raw"]
+    valid = before["metadata"]["error"] is None and after["metadata"]["error"] is None
+    fields = {key + "_changed": before["metadata"][key] != after["metadata"][key] if valid else None
+              for key in ("non_refcount", "reference_metadata", "row_count")}
+    require(not valid or raw_changed or not any(fields.values()), "IPV6_ROUTE_METADATA_SHAPE")
+    classification = ("PARSE_REJECTED" if not valid else "NON_REFCOUNT_DIFFERENCE"
+        if fields["non_refcount_changed"] or fields["row_count_changed"] else "REFERENCE_METADATA_ONLY"
+        if fields["reference_metadata_changed"] else "RAW_DIFFERENCE" if raw_changed else "UNCHANGED")
+    return dict(classification=classification, raw_changed=raw_changed, metadata_valid=valid, **fields)
+
+
+def baseline_unchanged(before, after, *, kvm_configuration=False):
+    require(type(kvm_configuration) is bool, "KVM_COMPARISON_MODE")
+    require(all(type(value) is dict and "ipv6_routes" in value and "ipv6_route_metadata" in value
+                for value in (before, after)), "IPV6_ROUTE_METADATA_SHAPE")
+    ipv6 = ipv6_route_comparison(*[dict(raw=value["ipv6_routes"], metadata=value["ipv6_route_metadata"])
+                                   for value in (before, after)])
+    if not ipv6["metadata_valid"]: return False
+    for value in (before, after):
+        require("ipv6_renderer" in value, "IPV6_RENDERER_METADATA_SHAPE")
+        validate_ipv6_renderer(value["ipv6_renderer"])
+    comparison = None
+    if type(before) is dict and type(after) is dict and ("kvm" in before or "kvm" in after):
+        require("kvm" in before and "kvm" in after, "KVM_METADATA_SHAPE")
+        comparison = kvm_comparison(before["kvm"], after["kvm"])
+    if kvm_configuration:
+        components = {"netns", "routes", "ipv6_routes", "ipv6_route_metadata", "ipv6_renderer", "resolver", "firewall", "credentials", "kvm"}
+        require(type(before) is dict and type(after) is dict and set(before) == set(after) == components,
+                "KVM_CONFIGURATION_BASELINE_SHAPE")
+        diagnostic = baseline_diagnostic(before, after, None)
+        require(diagnostic["diagnostic_error"] is None and diagnostic["before"] is not None
+                and diagnostic["after"] is not None, "KVM_CONFIGURATION_BASELINE_SHAPE")
     if before == after:
         if type(before) is dict and "firewall" in before:
             firewall_comparison(before["firewall"], after["firewall"])
         return True
+    ignored = {"firewall", "kvm", "ipv6_routes", "ipv6_route_metadata"} if kvm_configuration else {"firewall"}
     return (type(before) is dict and type(after) is dict and set(before) == set(after) and "firewall" in before
-            and {key: value for key, value in before.items() if key != "firewall"}
-                == {key: value for key, value in after.items() if key != "firewall"}
+            and {key: value for key, value in before.items() if key not in ignored}
+                == {key: value for key, value in after.items() if key not in ignored}
+            and (not kvm_configuration or comparison["configuration_unchanged"])
+            and (not kvm_configuration or ipv6["classification"] in ("UNCHANGED", "REFERENCE_METADATA_ONLY"))
             and not firewall_comparison(before["firewall"], after["firewall"])["config_changed"])
 
 
-def baseline():
+def baseline(*, renderer=None):
+    renderer = ipv6_renderer_snapshot() if renderer is None else renderer
+    validate_ipv6_renderer(renderer)
     rules = subprocess.check_output(["sudo", "-n", "nft", "-j", "list", "ruleset"], timeout=10)
+    ipv6 = read_ipv6_route_snapshot()
     return dict(netns=os.readlink("/proc/self/ns/net"), routes=digest(Path("/proc/net/route").read_bytes()),
-                ipv6_routes=digest(Path("/proc/net/ipv6_route").read_bytes()),
+                ipv6_routes=ipv6["raw"], ipv6_route_metadata=ipv6["metadata"], ipv6_renderer=renderer,
                 resolver=digest(Path("/etc/resolv.conf").read_bytes()), firewall=firewall_snapshot(rules),
                 credentials=credentials(), kvm=kvm_snapshot())
 
@@ -1185,8 +1373,9 @@ def phase_child(state, phase):
             "PHASE_OWNED_STATE")
     require(os.environ.get("SUDO_UID") == str(owner.st_uid) and os.environ.get("SUDO_GID") == str(owner.st_gid),
             "PHASE_SUDO_OWNER")
-    result = dict(schema=1, kind="hosted-phase", phase=phase, source=None, success=False,
-                  credentials=None, capabilities=None, probe=None, device_unchanged=False)
+    result = dict(schema=2, kind="hosted-phase", phase=phase, source=None, success=False,
+                  credentials=None, capabilities=None, probe=None, device_unchanged=False,
+                  device_configuration_unchanged=False, device_comparison=None, device_checkpoint=None)
     directory_fd, receipt_fd, writable, original = None, None, False, None
     try:
         # Bind a non-symlink owned directory before privileged file access.
@@ -1232,8 +1421,13 @@ def phase_child(state, phase):
         elif phase == "emulator":
             emulator_trial(state, env)
         require(credentials() == result["credentials"] and capability_bits() == result["capabilities"], "PHASE_CREDENTIAL_CHANGED")
-        require(kvm_snapshot() == expected, "KVM_DEVICE_CHANGED")
-        result.update(success=True, device_unchanged=True)
+        observed = kvm_snapshot()
+        comparison = kvm_comparison(expected, observed)
+        result.update(device_unchanged=comparison["raw_unchanged"],
+            device_configuration_unchanged=comparison["configuration_unchanged"], device_comparison=comparison,
+            device_checkpoint=dict(before=expected, after=observed))
+        require(comparison["raw_unchanged"] or (phase == "emulator" and comparison["configuration_unchanged"]), "KVM_DEVICE_CHANGED")
+        result["success"] = True
     except BaseException as error:
         original = error
         result.update(code=failure_code(error), errno=getattr(error, "errno", None))
@@ -1299,9 +1493,18 @@ def run_phase(state, phase, env, seconds):
             except BaseException:
                 if original is None: raise
     selected = [outer["kvm"]["kvm_gid"]] if phase in KVM_PHASES else []
-    require(receipt["schema"] == 1 and receipt["kind"] == "hosted-phase" and receipt["phase"] == phase
+    checkpoint = receipt.get("device_checkpoint")
+    require(type(checkpoint) is dict and set(checkpoint) == {"before", "after"}, "PHASE_KVM_CHECKPOINT")
+    require(kvm_comparison(outer["kvm"], checkpoint["before"])["raw_unchanged"], "PHASE_KVM_CHECKPOINT_ORIGIN")
+    comparison = kvm_comparison(outer["kvm"], checkpoint["after"])
+    recorded = receipt.get("device_comparison")
+    require(type(recorded) is dict and set(recorded) == set(comparison)
+            and type(recorded["raw_unchanged"]) is bool and type(recorded["configuration_unchanged"]) is bool
+            and recorded == comparison and receipt.get("device_unchanged") is comparison["raw_unchanged"]
+            and receipt.get("device_configuration_unchanged") is comparison["configuration_unchanged"], "PHASE_KVM_CHECKPOINT")
+    require(type(receipt["schema"]) is int and receipt["schema"] == 2 and receipt["kind"] == "hosted-phase" and receipt["phase"] == phase
             and receipt["source"] == env["GITHUB_SHA"] and receipt["success"] is True
-            and receipt["device_unchanged"] is True
+            and (comparison["raw_unchanged"] or (phase == "emulator" and comparison["configuration_unchanged"]))
             and receipt["credentials"] == dict(uid=outer["credentials"]["uid"], gid=outer["credentials"]["gid"], groups=selected)
             and receipt["capabilities"] == dict(CapEff=0, CapPrm=0, CapAmb=0), "PHASE_RECEIPT_CONTRACT")
     require(receipt["probe"] == (dict(api_version=12, fd_closed=True, vm_created=False) if phase in KVM_PHASES else None),
@@ -1317,10 +1520,11 @@ def failure_code(error):
 
 def baseline_diagnostic(before, after, capture_error):
     """Only fixed metadata/hash snapshots; never raw host configuration or errors."""
-    components = ("netns", "routes", "ipv6_routes", "resolver", "firewall", "credentials", "kvm")
+    components = ("netns", "routes", "ipv6_routes", "ipv6_route_metadata", "ipv6_renderer", "resolver", "firewall", "credentials", "kvm")
     require(capture_error in (None, "BASELINE_NOT_CAPTURED", "BASELINE_BEFORE_UNAVAILABLE", "BASELINE_CAPTURE_FAILED"),
             "BASELINE_CAPTURE_CODE")
-    result = dict(schema=2, before=None, after=None, changed_components=None, firewall_comparison=None,
+    result = dict(schema=3, before=None, after=None, changed_components=None, firewall_comparison=None,
+                  ipv6_route_comparison=None,
                   capture_error=capture_error, diagnostic_error=None)
 
     def integer(value):
@@ -1333,7 +1537,13 @@ def baseline_diagnostic(before, after, capture_error):
     def snapshot(value):
         if type(value) is not dict or set(value) != set(components): return False
         if type(value["netns"]) is not str or re.fullmatch(r"net:\[[0-9]{1,20}\]", value["netns"]) is None: return False
-        if not all(fingerprint(value[key]) for key in components[1:4]): return False
+        if not all(fingerprint(value[key]) for key in ("routes", "ipv6_routes", "resolver")): return False
+        try:
+            ipv6 = dict(raw=value["ipv6_routes"], metadata=value["ipv6_route_metadata"])
+            ipv6_route_comparison(ipv6, ipv6)
+            validate_ipv6_renderer(value["ipv6_renderer"])
+        except ValueError:
+            return False
         firewall = value["firewall"]
         if (type(firewall) is not dict or set(firewall) != {"schema", "raw", "config", "counters", "counter_count"}
                 or type(firewall["schema"]) is not int or firewall["schema"] != 1
@@ -1364,14 +1574,21 @@ def baseline_diagnostic(before, after, capture_error):
     if result["before"] is not None and result["after"] is not None:
         result["changed_components"] = [key for key in components if before[key] != after[key]]
         result["firewall_comparison"] = firewall_comparison(before["firewall"], after["firewall"])
+        try:
+            result["ipv6_route_comparison"] = ipv6_route_comparison(*[
+                dict(raw=value["ipv6_routes"], metadata=value["ipv6_route_metadata"]) for value in (before, after)])
+        except ValueError:
+            result["diagnostic_error"] = "BASELINE_METADATA_SHAPE"
     return result
 
 
 def finalize(state, evidence, before, complete, original, control_mode=None):
     """Best-effort bounded finalization; original failure always keeps precedence."""
     errors, removed, unchanged, drained = [], False, None, False
+    configuration_accepted, kvm_checkpoint = None, None
+    configuration_mode = False
     after, capture_error = None, "BASELINE_NOT_CAPTURED"
-    result = dict(schema=2, source=os.environ.get("GITHUB_SHA"), success=False,
+    result = dict(schema=3, source=os.environ.get("GITHUB_SHA"), success=False,
                   primary_failure=failure_code(original), synthetic_only=True, hardware_acceptance=False)
     try:
         with ACTIVE.cleanup():
@@ -1386,14 +1603,19 @@ def finalize(state, evidence, before, complete, original, control_mode=None):
             drained = not ACTIVE.owned
             try:
                 if before is None:
-                    unchanged, capture_error = False, "BASELINE_BEFORE_UNAVAILABLE"
+                    unchanged, configuration_accepted, capture_error = False, False, "BASELINE_BEFORE_UNAVAILABLE"
                 else:
                     after = baseline()
                     unchanged, capture_error = baseline_unchanged(before, after), None
+                    configuration_mode = (complete is True and original is None and control_mode is None
+                                          and ACTIVE.first_signal is None and drained and not ACTIVE.cleanup_errors)
+                    configuration_accepted = baseline_unchanged(before, after, kvm_configuration=True) if configuration_mode else unchanged
+                    if type(before) is dict and type(after) is dict and "kvm" in before and "kvm" in after:
+                        kvm_checkpoint = kvm_comparison(before["kvm"], after["kvm"])
             except BaseException as error:
-                errors.append(failure_code(error)); unchanged = False
+                errors.append(failure_code(error)); unchanged, configuration_accepted = False, False
                 capture_error = "BASELINE_CAPTURE_FAILED"
-            if not unchanged:
+            if not configuration_accepted:
                 errors.append("HOST_BASELINE_UNCONFIRMED")
             for path in state.glob("*.json"):
                 if path.name != "environment.json":
@@ -1415,13 +1637,21 @@ def finalize(state, evidence, before, complete, original, control_mode=None):
     finally:
         # Tiny fixed receipts remain best effort after a cleanup deadline. A hard
         # kill, blocked filesystem or runner destruction can prevent even these.
-        result.update(host_routes_dns_firewall_unchanged=unchanged, registered_groups_drained=drained,
-            owned_state_removed=removed, completed_workload=complete, first_signal=ACTIVE.first_signal,
-            signal_count=ACTIVE.signal_count, cleanup_errors=ACTIVE.cleanup_errors + errors,
-            success=complete and unchanged is True and drained and removed and not errors
-                    and not ACTIVE.cleanup_errors and ACTIVE.first_signal is None)
         try:
             result["baseline_comparison"] = baseline_diagnostic(before, after, capture_error)
+            # A deferred cleanup signal revokes the configuration-only criterion too.
+            if ACTIVE.first_signal is not None or not drained or not removed or errors or ACTIVE.cleanup_errors:
+                configuration_mode, configuration_accepted = False, unchanged
+                if unchanged is False and "HOST_BASELINE_UNCONFIRMED" not in errors:
+                    errors.append("HOST_BASELINE_UNCONFIRMED")
+            result.update(host_routes_dns_firewall_unchanged=unchanged,
+                host_configuration_checkpoint_accepted=configuration_accepted,
+                baseline_acceptance_mode="COMPLETED_EMULATOR_CONFIGURATION" if configuration_mode else "STRICT_KVM_METADATA",
+                kvm_comparison=kvm_checkpoint, registered_groups_drained=drained,
+                owned_state_removed=removed, completed_workload=complete, first_signal=ACTIVE.first_signal,
+                signal_count=ACTIVE.signal_count, cleanup_errors=ACTIVE.cleanup_errors + errors,
+                success=complete is True and original is None and configuration_accepted is True and drained and removed and not errors
+                        and not ACTIVE.cleanup_errors and ACTIVE.first_signal is None)
             # Keep the existing receipt bounded even at the diagnostic limit.
             # Omitting diagnostic snapshots never changes the equality verdict.
             if len((json.dumps(result, indent=2, sort_keys=True) + "\n").encode()) > 16384:
@@ -1779,8 +2009,12 @@ def main():
             workflow=WORKFLOW, run=os.environ["GITHUB_RUN_ID"], attempt=os.environ["GITHUB_RUN_ATTEMPT"],
             parent_pidns=os.readlink("/proc/self/ns/pid")))
         admitted = kvm_admission(state)
-        before = baseline(); require(before["kvm"] == admitted, "KVM_DEVICE_CHANGED")
+        renderer = ipv6_renderer_admission(state)
+        before = baseline(renderer=renderer); require(before["kvm"] == admitted, "KVM_DEVICE_CHANGED")
         save(state / "baseline.json", before)
+        require(ipv6_route_comparison(dict(raw=before["ipv6_routes"], metadata=before["ipv6_route_metadata"]),
+                dict(raw=before["ipv6_routes"], metadata=before["ipv6_route_metadata"]))["metadata_valid"],
+                "IPV6_ROUTE_LAYOUT_UNSUPPORTED")
         env = environment(state, state / "tools")
         for directory in ("home", "android-home", "gradle-home", "rustup", "cargo"):
             (state / directory).mkdir(mode=0o700)

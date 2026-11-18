@@ -21,7 +21,7 @@ public final class QualityActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         quality = new TextView(this); quality.setText(UNAVAILABLE);
-        controller = new QualityController(q -> quality.setText(q == null ? UNAVAILABLE : "SYNTHETIC QUALITY ONLY\n" + q.display()));
+        controller = new QualityController(this::showQuality);
         enable = new Button(this);
         enable.setText("Consent to local synthetic quality for 30 seconds");
         enable.setOnClickListener(v -> controller.enable(true, QualityController.MAX_TTL_MS));
@@ -40,7 +40,14 @@ public final class QualityActivity extends Activity {
         });
         root.addView(quality); root.addView(enable); root.addView(assess); root.addView(revoke); setContentView(root);
     }
+    void showQuality(QualitySummary result) {
+        quality.setText(result == null ? UNAVAILABLE : "SYNTHETIC QUALITY ONLY\n" + result.display());
+    }
     @Override public void onStart() { super.onStart(); ++starts; controller.foreground(); }
+    @Override public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus && controller != null) controller.refreshExpiry();
+    }
     @Override public void onStop() { controller.background(); ++stops; super.onStop(); }
     @Override public void onDestroy() { controller.close(); super.onDestroy(); }
 }

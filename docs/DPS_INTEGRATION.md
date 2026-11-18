@@ -1520,3 +1520,16 @@ goal or establish production positioning behavior. Keep that goal open; the
 next functional priority is integration of the real sensor/platform and main
 Map consumer paths. The completed fixture should only be repeated if a relevant
 change requires it.
+
+### Expiry after Android sleep
+
+The synthetic quality controller uses an elapsed-realtime consent deadline.
+Android Handler timers use uptime, which pauses during deep sleep. The controller
+therefore checks the deadline synchronously when the Activity starts, its
+window regains focus, or the user submits another assessment. An expired choice
+clears the visible summary and requires fresh consent.
+
+The instrumentation suite advances an injected elapsed clock while the existing
+Activity stays started behind a dialog. Dismissing that dialog exercises Android's
+focus callback before the original timer is due. This scenario uses the same
+public synthetic vectors and coordinate-free Rust assessment as the other tests.

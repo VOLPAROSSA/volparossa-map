@@ -1,0 +1,317 @@
+[
+  {
+    "engine": "chromium",
+    "width": 1440,
+    "mode": "default",
+    "initial": 655269,
+    "total": 1021032,
+    "hero": "hero-desktop-1440.avif",
+    "diagnostics": [],
+    "overflow": false,
+    "peers": 6,
+    "edges": 9,
+    "aligned": true,
+    "docs": [
+      "http://127.0.0.1:8782/volparossa-map/#shared-maps",
+      "https://volparossa.org/docs/#map",
+      "https://volparossa.org/docs/#map",
+      "https://github.com/VOLPAROSSA/volparossa-map"
+    ],
+    "missing": [],
+    "errors": []
+  },
+  {
+    "engine": "chromium",
+    "width": 390,
+    "mode": "default",
+    "initial": 508894,
+    "total": 578147,
+    "hero": "hero-mobile-480.avif",
+    "diagnostics": [],
+    "overflow": false,
+    "peers": 6,
+    "edges": 9,
+    "aligned": true,
+    "docs": [
+      "http://127.0.0.1:8782/volparossa-map/#shared-maps",
+      "https://volparossa.org/docs/#map",
+      "https://volparossa.org/docs/#map",
+      "https://github.com/VOLPAROSSA/volparossa-map"
+    ],
+    "missing": [],
+    "errors": []
+  },
+  {
+    "engine": "chromium",
+    "width": 320,
+    "mode": "default",
+    "initial": 508894,
+    "total": 578147,
+    "hero": "hero-mobile-480.avif",
+    "diagnostics": [],
+    "overflow": false,
+    "peers": 6,
+    "edges": 9,
+    "aligned": true,
+    "docs": [
+      "http://127.0.0.1:8782/volparossa-map/#shared-maps",
+      "https://volparossa.org/docs/#map",
+      "https://volparossa.org/docs/#map",
+      "https://github.com/VOLPAROSSA/volparossa-map"
+    ],
+    "missing": [],
+    "errors": []
+  },
+  {
+    "engine": "chromium",
+    "width": 768,
+    "mode": "default",
+    "initial": 648505,
+    "total": 883750,
+    "hero": "hero-mobile-800.avif",
+    "diagnostics": [],
+    "overflow": false,
+    "peers": 6,
+    "edges": 9,
+    "aligned": true,
+    "docs": [
+      "http://127.0.0.1:8782/volparossa-map/#shared-maps",
+      "https://volparossa.org/docs/#map",
+      "https://volparossa.org/docs/#map",
+      "https://github.com/VOLPAROSSA/volparossa-map"
+    ],
+    "missing": [],
+    "errors": []
+  },
+  {
+    "engine": "chromium",
+    "width": 1920,
+    "mode": "default",
+    "initial": 1146926,
+    "total": 1352101,
+    "hero": "hero-desktop-1983.avif",
+    "diagnostics": [],
+    "overflow": false,
+    "peers": 6,
+    "edges": 9,
+    "aligned": true,
+    "docs": [
+      "http://127.0.0.1:8782/volparossa-map/#shared-maps",
+      "https://volparossa.org/docs/#map",
+      "https://volparossa.org/docs/#map",
+      "https://github.com/VOLPAROSSA/volparossa-map"
+    ],
+    "missing": [],
+    "errors": []
+  },
+  {
+    "engine": "chromium",
+    "width": 844,
+    "mode": "default",
+    "initial": 729714,
+    "total": 834956,
+    "hero": "hero-desktop-1440.avif",
+    "diagnostics": [],
+    "overflow": false,
+    "peers": 6,
+    "edges": 9,
+    "aligned": true,
+    "docs": [
+      "http://127.0.0.1:8782/volparossa-map/#shared-maps",
+      "https://volparossa.org/docs/#map",
+      "https://volparossa.org/docs/#map",
+      "https://github.com/VOLPAROSSA/volparossa-map"
+    ],
+    "missing": [],
+    "errors": []
+  },
+  {
+    "engine": "chromium",
+    "width": 390,
+    "mode": "no-js",
+    "initial": 577269,
+    "total": 577269,
+    "hero": "hero-mobile-480.avif",
+    "diagnostics": [],
+    "overflow": false,
+    "peers": 6,
+    "edges": 9,
+    "aligned": true,
+    "docs": [
+      "http://127.0.0.1:8782/volparossa-map/#shared-maps",
+      "https://volparossa.org/docs/#map",
+      "https://volparossa.org/docs/#map",
+      "https://github.com/VOLPAROSSA/volparossa-map"
+    ],
+    "missing": [],
+    "errors": []
+  },
+  {
+    "engine": "chromium",
+    "width": 1440,
+    "mode": "text-200",
+    "initial": 592082,
+    "total": 1021032,
+    "hero": "hero-desktop-1440.avif",
+    "diagnostics": [],
+    "overflow": false,
+    "peers": 6,
+    "edges": 9,
+    "aligned": true,
+    "docs": [
+      "http://127.0.0.1:8782/volparossa-map/#shared-maps",
+      "https://volparossa.org/docs/#map",
+      "https://volparossa.org/docs/#map",
+      "https://github.com/VOLPAROSSA/volparossa-map"
+    ],
+    "missing": [],
+    "errors": []
+  },
+  {
+    "engine": "chromium",
+    "width": 320,
+    "mode": "reflow",
+    "initial": 486438,
+    "total": 578147,
+    "hero": "hero-mobile-480.avif",
+    "diagnostics": [],
+    "overflow": false,
+    "peers": 6,
+    "edges": 9,
+    "aligned": true,
+    "docs": [
+      "http://127.0.0.1:8782/volparossa-map/#shared-maps",
+      "https://volparossa.org/docs/#map",
+      "https://volparossa.org/docs/#map",
+      "https://github.com/VOLPAROSSA/volparossa-map"
+    ],
+    "missing": [],
+    "errors": []
+  },
+  {
+    "engine": "chromium",
+    "width": 390,
+    "mode": "dpr2",
+    "initial": 711692,
+    "total": 883750,
+    "hero": "hero-mobile-800.avif",
+    "diagnostics": [],
+    "overflow": false,
+    "peers": 6,
+    "edges": 9,
+    "aligned": true,
+    "docs": [
+      "http://127.0.0.1:8782/volparossa-map/#shared-maps",
+      "https://volparossa.org/docs/#map",
+      "https://volparossa.org/docs/#map",
+      "https://github.com/VOLPAROSSA/volparossa-map"
+    ],
+    "missing": [],
+    "errors": []
+  },
+  {
+    "engine": "firefox",
+    "width": 390,
+    "mode": "default",
+    "initial": 434461,
+    "total": 578147,
+    "hero": "hero-mobile-480.avif",
+    "diagnostics": [],
+    "overflow": false,
+    "peers": 6,
+    "edges": 9,
+    "aligned": true,
+    "docs": [
+      "http://127.0.0.1:8782/volparossa-map/#shared-maps",
+      "https://volparossa.org/docs/#map",
+      "https://volparossa.org/docs/#map",
+      "https://github.com/VOLPAROSSA/volparossa-map"
+    ],
+    "missing": [],
+    "errors": []
+  },
+  {
+    "engine": "firefox",
+    "width": 1440,
+    "mode": "default",
+    "initial": 592082,
+    "total": 1021032,
+    "hero": "hero-desktop-1440.avif",
+    "diagnostics": [],
+    "overflow": false,
+    "peers": 6,
+    "edges": 9,
+    "aligned": true,
+    "docs": [
+      "http://127.0.0.1:8782/volparossa-map/#shared-maps",
+      "https://volparossa.org/docs/#map",
+      "https://volparossa.org/docs/#map",
+      "https://github.com/VOLPAROSSA/volparossa-map"
+    ],
+    "missing": [],
+    "errors": []
+  },
+  {
+    "engine": "firefox",
+    "width": 2560,
+    "mode": "default",
+    "initial": 733686,
+    "total": 1551255,
+    "hero": "hero-desktop-1983.avif",
+    "diagnostics": [],
+    "overflow": false,
+    "peers": 6,
+    "edges": 9,
+    "aligned": true,
+    "docs": [
+      "http://127.0.0.1:8782/volparossa-map/#shared-maps",
+      "https://volparossa.org/docs/#map",
+      "https://volparossa.org/docs/#map",
+      "https://github.com/VOLPAROSSA/volparossa-map"
+    ],
+    "missing": [],
+    "errors": []
+  },
+  {
+    "engine": "webkit",
+    "width": 390,
+    "mode": "default",
+    "initial": 429347,
+    "total": 429347,
+    "hero": "hero-mobile-480.avif",
+    "diagnostics": [],
+    "overflow": false,
+    "peers": 6,
+    "edges": 9,
+    "aligned": true,
+    "docs": [
+      "http://127.0.0.1:8782/volparossa-map/#shared-maps",
+      "https://volparossa.org/docs/#map",
+      "https://volparossa.org/docs/#map",
+      "https://github.com/VOLPAROSSA/volparossa-map"
+    ],
+    "missing": [],
+    "errors": []
+  },
+  {
+    "engine": "webkit",
+    "width": 1440,
+    "mode": "default",
+    "initial": 474065,
+    "total": 474065,
+    "hero": "hero-desktop-1440.avif",
+    "diagnostics": [],
+    "overflow": false,
+    "peers": 6,
+    "edges": 9,
+    "aligned": true,
+    "docs": [
+      "http://127.0.0.1:8782/volparossa-map/#shared-maps",
+      "https://volparossa.org/docs/#map",
+      "https://volparossa.org/docs/#map",
+      "https://github.com/VOLPAROSSA/volparossa-map"
+    ],
+    "missing": [],
+    "errors": []
+  }
+]

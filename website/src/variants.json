@@ -1,0 +1,345 @@
+{
+  "hero": {
+    "desktop": {
+      "master": "hero.png",
+      "crop": [
+        0,
+        0,
+        1983,
+        793
+      ],
+      "files": [
+        {
+          "stem": "hero-desktop-800",
+          "width": 800,
+          "height": 320
+        },
+        {
+          "stem": "hero-desktop-1440",
+          "width": 1440,
+          "height": 576
+        },
+        {
+          "stem": "hero-desktop-1983",
+          "width": 1983,
+          "height": 793
+        }
+      ]
+    },
+    "mobile": {
+      "master": "hero-mobile.png",
+      "crop": [
+        0,
+        0,
+        1086,
+        1448
+      ],
+      "files": [
+        {
+          "stem": "hero-mobile-480",
+          "width": 480,
+          "height": 640
+        },
+        {
+          "stem": "hero-mobile-800",
+          "width": 800,
+          "height": 1067
+        }
+      ]
+    }
+  },
+  "huts": {
+    "desktop": {
+      "master": "huts.png",
+      "crop": [
+        0,
+        0,
+        2021,
+        778
+      ],
+      "files": [
+        {
+          "stem": "huts-desktop-800",
+          "width": 800,
+          "height": 308
+        },
+        {
+          "stem": "huts-desktop-1440",
+          "width": 1440,
+          "height": 554
+        },
+        {
+          "stem": "huts-desktop-2021",
+          "width": 2021,
+          "height": 778
+        }
+      ]
+    },
+    "mobile": {
+      "master": "huts-mobile.png",
+      "crop": [
+        0,
+        0,
+        1086,
+        1448
+      ],
+      "files": [
+        {
+          "stem": "huts-mobile-480",
+          "width": 480,
+          "height": 640
+        },
+        {
+          "stem": "huts-mobile-800",
+          "width": 800,
+          "height": 1067
+        }
+      ]
+    }
+  },
+  "road": {
+    "desktop": {
+      "master": "road.png",
+      "crop": [
+        0,
+        0,
+        1774,
+        887
+      ],
+      "files": [
+        {
+          "stem": "road-desktop-800",
+          "width": 800,
+          "height": 400
+        },
+        {
+          "stem": "road-desktop-1440",
+          "width": 1440,
+          "height": 720
+        },
+        {
+          "stem": "road-desktop-1774",
+          "width": 1774,
+          "height": 887
+        }
+      ]
+    },
+    "mobile": {
+      "master": "road.png",
+      "crop": [
+        0,
+        0,
+        1774,
+        887
+      ],
+      "files": [
+        {
+          "stem": "road-mobile-480",
+          "width": 480,
+          "height": 240
+        },
+        {
+          "stem": "road-mobile-800",
+          "width": 800,
+          "height": 400
+        }
+      ]
+    }
+  },
+  "dps": {
+    "desktop": {
+      "master": "dps.png",
+      "crop": [
+        0,
+        0,
+        2022,
+        778
+      ],
+      "files": [
+        {
+          "stem": "dps-desktop-800",
+          "width": 800,
+          "height": 308
+        },
+        {
+          "stem": "dps-desktop-1440",
+          "width": 1440,
+          "height": 554
+        },
+        {
+          "stem": "dps-desktop-2022",
+          "width": 2022,
+          "height": 778
+        }
+      ]
+    },
+    "mobile": {
+      "master": "dps.png",
+      "crop": [
+        0,
+        0,
+        2022,
+        778
+      ],
+      "files": [
+        {
+          "stem": "dps-mobile-480",
+          "width": 480,
+          "height": 185
+        },
+        {
+          "stem": "dps-mobile-800",
+          "width": 800,
+          "height": 308
+        }
+      ]
+    }
+  },
+  "bridge": {
+    "desktop": {
+      "master": "bridge.png",
+      "crop": [
+        0,
+        0,
+        2060,
+        763
+      ],
+      "files": [
+        {
+          "stem": "bridge-desktop-800",
+          "width": 800,
+          "height": 296
+        },
+        {
+          "stem": "bridge-desktop-1440",
+          "width": 1440,
+          "height": 533
+        },
+        {
+          "stem": "bridge-desktop-2048",
+          "width": 2048,
+          "height": 759
+        }
+      ]
+    },
+    "mobile": {
+      "master": "bridge.png",
+      "crop": [
+        0,
+        0,
+        2060,
+        763
+      ],
+      "files": [
+        {
+          "stem": "bridge-mobile-480",
+          "width": 480,
+          "height": 178
+        },
+        {
+          "stem": "bridge-mobile-800",
+          "width": 800,
+          "height": 296
+        }
+      ]
+    }
+  },
+  "terrace": {
+    "desktop": {
+      "master": "terrace.png",
+      "crop": [
+        0,
+        0,
+        1983,
+        793
+      ],
+      "files": [
+        {
+          "stem": "terrace-desktop-800",
+          "width": 800,
+          "height": 320
+        },
+        {
+          "stem": "terrace-desktop-1440",
+          "width": 1440,
+          "height": 576
+        },
+        {
+          "stem": "terrace-desktop-1983",
+          "width": 1983,
+          "height": 793
+        }
+      ]
+    },
+    "mobile": {
+      "master": "terrace-mobile.png",
+      "crop": [
+        0,
+        0,
+        1983,
+        793
+      ],
+      "files": [
+        {
+          "stem": "terrace-mobile-480",
+          "width": 480,
+          "height": 192
+        },
+        {
+          "stem": "terrace-mobile-800",
+          "width": 800,
+          "height": 320
+        }
+      ]
+    }
+  },
+  "closing": {
+    "desktop": {
+      "master": "closing.png",
+      "crop": [
+        0,
+        0,
+        2172,
+        724
+      ],
+      "files": [
+        {
+          "stem": "closing-desktop-800",
+          "width": 800,
+          "height": 267
+        },
+        {
+          "stem": "closing-desktop-1440",
+          "width": 1440,
+          "height": 480
+        },
+        {
+          "stem": "closing-desktop-2048",
+          "width": 2048,
+          "height": 683
+        }
+      ]
+    },
+    "mobile": {
+      "master": "closing.png",
+      "crop": [
+        1260,
+        0,
+        2172,
+        724
+      ],
+      "files": [
+        {
+          "stem": "closing-mobile-480",
+          "width": 480,
+          "height": 381
+        },
+        {
+          "stem": "closing-mobile-800",
+          "width": 800,
+          "height": 635
+        }
+      ]
+    }
+  }
+}

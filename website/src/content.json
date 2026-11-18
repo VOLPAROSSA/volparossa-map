@@ -1,0 +1,11 @@
+{
+  "title": "VOLPAROSSA Map | Your world. More possibilities.",
+  "description": "Explore the Organic Maps foundation, shared map downloads, road conditions and privacy-preserving positioning in VOLPAROSSA Map.",
+  "social_alt": "VOLPAROSSA Map. A red fox above Sunrise Pass.",
+  "repository": "https://github.com/VOLPAROSSA/volparossa-map",
+  "docs_url": "https://volparossa.org/docs/#map",
+  "dps_url": "https://github.com/VOLPAROSSA/volparossa-map/blob/main/docs/DPS_INTEGRATION.md",
+  "traffic_evidence": "https://github.com/VOLPAROSSA/volparossa-map/blob/95a83c2869858aa90d04b60bf0bca63274397520/docs/TRAFFIC_ADAPTER.md",
+  "dps_evidence": "https://github.com/VOLPAROSSA/volparossa-map/blob/95a83c2869858aa90d04b60bf0bca63274397520/docs/DPS_INTEGRATION.md#accepted-bounded-synthetic-debug-activityjni-checkpoint",
+  "theme_commit": "a897eb6725ec7f9df4c1733131c69445adfbd651"
+}

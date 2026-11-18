@@ -1,0 +1,1062 @@
+{
+  "assets/map/bridge-desktop-1440.avif": {
+    "bytes": 126652,
+    "sha256": "9f7fa152abb157fd7ba8e94db6f7a1ce15d5aa444d5041363e36eea7dfdcf1ba",
+    "dimensions": [
+      1440,
+      533
+    ]
+  },
+  "assets/map/bridge-desktop-1440.jpg": {
+    "bytes": 293676,
+    "sha256": "d4523fa36a8e2155662900e8b627b52940b08b2a34c5fe06b8bbbf766ea50e18",
+    "dimensions": [
+      1440,
+      533
+    ]
+  },
+  "assets/map/bridge-desktop-1440.webp": {
+    "bytes": 278652,
+    "sha256": "84df12452b327e50b6e1b87e1f3529fef7b0176fd3628a624799c84bc14b2614",
+    "dimensions": [
+      1440,
+      533
+    ]
+  },
+  "assets/map/bridge-desktop-2048.avif": {
+    "bytes": 217682,
+    "sha256": "6356ff1de1da9aaf102b1a0a2c2cd433c3cac6de75dbd43f1f2e7a731b2aa6b1",
+    "dimensions": [
+      2048,
+      759
+    ]
+  },
+  "assets/map/bridge-desktop-2048.jpg": {
+    "bytes": 529565,
+    "sha256": "9420373c12fddb1a85a2df45a27e8bbc96f15f4e245e636335e17a463bc3137c",
+    "dimensions": [
+      2048,
+      759
+    ]
+  },
+  "assets/map/bridge-desktop-2048.webp": {
+    "bytes": 493558,
+    "sha256": "b5b18565e18c7e6aeb8762a257a19ab710b845ec80d48af081cb27c904c45bb9",
+    "dimensions": [
+      2048,
+      759
+    ]
+  },
+  "assets/map/bridge-desktop-800.avif": {
+    "bytes": 41165,
+    "sha256": "457db79f106fea995e80a63f7c64d5806b2ee955b4da8f6f04a465f33bd1bdf2",
+    "dimensions": [
+      800,
+      296
+    ]
+  },
+  "assets/map/bridge-desktop-800.jpg": {
+    "bytes": 96403,
+    "sha256": "1b03614665c1be69103b78fc678e1b1d76115326e4fb5d8084077c6206192ca3",
+    "dimensions": [
+      800,
+      296
+    ]
+  },
+  "assets/map/bridge-desktop-800.webp": {
+    "bytes": 95772,
+    "sha256": "7805120ecb539006cc4caf1b7ae8935063b09a8a607fd29dc1926fc676fa6b1e",
+    "dimensions": [
+      800,
+      296
+    ]
+  },
+  "assets/map/bridge-mobile-480.avif": {
+    "bytes": 15982,
+    "sha256": "112642312c4ebee6ddd5b98be1ff558657c6f26e1e0c02fef94d5518e4c83185",
+    "dimensions": [
+      480,
+      178
+    ]
+  },
+  "assets/map/bridge-mobile-480.jpg": {
+    "bytes": 36970,
+    "sha256": "515f56b1098117307cc6e4e3a1981b5ab139b4471682dd3fcfafa7f47b2113a1",
+    "dimensions": [
+      480,
+      178
+    ]
+  },
+  "assets/map/bridge-mobile-480.webp": {
+    "bytes": 36436,
+    "sha256": "31bb3c9c988d046925925aae16ad3907e9e506b568ffefb094b9f6a286fd949c",
+    "dimensions": [
+      480,
+      178
+    ]
+  },
+  "assets/map/bridge-mobile-800.avif": {
+    "bytes": 41165,
+    "sha256": "457db79f106fea995e80a63f7c64d5806b2ee955b4da8f6f04a465f33bd1bdf2",
+    "dimensions": [
+      800,
+      296
+    ]
+  },
+  "assets/map/bridge-mobile-800.jpg": {
+    "bytes": 96403,
+    "sha256": "1b03614665c1be69103b78fc678e1b1d76115326e4fb5d8084077c6206192ca3",
+    "dimensions": [
+      800,
+      296
+    ]
+  },
+  "assets/map/bridge-mobile-800.webp": {
+    "bytes": 95772,
+    "sha256": "7805120ecb539006cc4caf1b7ae8935063b09a8a607fd29dc1926fc676fa6b1e",
+    "dimensions": [
+      800,
+      296
+    ]
+  },
+  "assets/map/closing-desktop-1440.avif": {
+    "bytes": 81917,
+    "sha256": "b6582022fd518e7868fd40233fd13d5aae926e348a40ac8f62a038c4debeb9c2",
+    "dimensions": [
+      1440,
+      480
+    ]
+  },
+  "assets/map/closing-desktop-1440.jpg": {
+    "bytes": 201062,
+    "sha256": "26d13c47faeff0ce57e0bf90efa0f751fb9dcb1875db3fd1553f2bd2a44651a8",
+    "dimensions": [
+      1440,
+      480
+    ]
+  },
+  "assets/map/closing-desktop-1440.webp": {
+    "bytes": 177258,
+    "sha256": "91eeb0e784e0d7bcb14cf4fc5a15ba87f639b4a150b7a33757b9ca0fedbd172b",
+    "dimensions": [
+      1440,
+      480
+    ]
+  },
+  "assets/map/closing-desktop-2048.avif": {
+    "bytes": 146611,
+    "sha256": "de399b29f4db4847c6e823b26b80b98e5595ac9fad652325a46124fdaa0c17ab",
+    "dimensions": [
+      2048,
+      683
+    ]
+  },
+  "assets/map/closing-desktop-2048.jpg": {
+    "bytes": 366665,
+    "sha256": "0633c37d9d4d9d9b92741be8d87a7c17d9192d71e56002da082cc005e7078669",
+    "dimensions": [
+      2048,
+      683
+    ]
+  },
+  "assets/map/closing-desktop-2048.webp": {
+    "bytes": 306428,
+    "sha256": "b1840a2fa22d4183f347889cb47760be1a6f37bed6f10577239a4a1f11ed69a3",
+    "dimensions": [
+      2048,
+      683
+    ]
+  },
+  "assets/map/closing-desktop-800.avif": {
+    "bytes": 28484,
+    "sha256": "2e88e7a76f9f8d49b6d0750ac2b4abc251effb48bbfc8abc8d90d9df0256aa94",
+    "dimensions": [
+      800,
+      267
+    ]
+  },
+  "assets/map/closing-desktop-800.jpg": {
+    "bytes": 69623,
+    "sha256": "ede14c5e2720fa5efe3fcb614fa2d6129c06a0b51e432216023040fc0790229b",
+    "dimensions": [
+      800,
+      267
+    ]
+  },
+  "assets/map/closing-desktop-800.webp": {
+    "bytes": 63350,
+    "sha256": "83d0093ec10aa3ec84b40774bee2e88fde9290f6ef1a591c98f76dce4217a01e",
+    "dimensions": [
+      800,
+      267
+    ]
+  },
+  "assets/map/closing-mobile-480.avif": {
+    "bytes": 27903,
+    "sha256": "cd52cc7b422cedf60c6c72232e0647a9af81c10e34bca422da6cecb2cdfef579",
+    "dimensions": [
+      480,
+      381
+    ]
+  },
+  "assets/map/closing-mobile-480.jpg": {
+    "bytes": 67275,
+    "sha256": "5fffe38a0d0788addf98fe86184a0674bf0153efd339728ffc21f3fbde5ba393",
+    "dimensions": [
+      480,
+      381
+    ]
+  },
+  "assets/map/closing-mobile-480.webp": {
+    "bytes": 66632,
+    "sha256": "c0f621bd59d4d9f75fa0d983c0bcc0aa6d394ee3eb7dce99e2d510c22eb0068a",
+    "dimensions": [
+      480,
+      381
+    ]
+  },
+  "assets/map/closing-mobile-800.avif": {
+    "bytes": 68128,
+    "sha256": "e2c06e37382840e13ecb0cc8d994d1cc6b3272234c020c01dc4ced907e4127df",
+    "dimensions": [
+      800,
+      635
+    ]
+  },
+  "assets/map/closing-mobile-800.jpg": {
+    "bytes": 166411,
+    "sha256": "8783a322e1f832f2ab942744dc9749b11ab0088c0b402afefb36e9c0ca0637cc",
+    "dimensions": [
+      800,
+      635
+    ]
+  },
+  "assets/map/closing-mobile-800.webp": {
+    "bytes": 155038,
+    "sha256": "470632e7a38215b8f896e6aeb6fe2493428ccb8807b1d0d2775553a36805a63c",
+    "dimensions": [
+      800,
+      635
+    ]
+  },
+  "assets/map/dps-desktop-1440.avif": {
+    "bytes": 98030,
+    "sha256": "5f72526eee6f4b6a6f16089d09dc979f9a91e20198ae0121ba580a80f281a086",
+    "dimensions": [
+      1440,
+      554
+    ]
+  },
+  "assets/map/dps-desktop-1440.jpg": {
+    "bytes": 234606,
+    "sha256": "d781053c3bb16edf22584c2c8c671acc6b1f55f4f62cc1c5f9a17800ba972988",
+    "dimensions": [
+      1440,
+      554
+    ]
+  },
+  "assets/map/dps-desktop-1440.webp": {
+    "bytes": 208634,
+    "sha256": "cd4d372f5e95badeb0cc9c4c571e20183ad7bd1eedb45df5346196806290580e",
+    "dimensions": [
+      1440,
+      554
+    ]
+  },
+  "assets/map/dps-desktop-2022.avif": {
+    "bytes": 170730,
+    "sha256": "549bbd79e2764643b8f1a3cb785987bc276442ebaa9fe971eefe08d83d36e8bb",
+    "dimensions": [
+      2022,
+      778
+    ]
+  },
+  "assets/map/dps-desktop-2022.jpg": {
+    "bytes": 418882,
+    "sha256": "f9376d178125a5a11c1fb44fd62c82fcbba02849d7d95e06609438c1a26b5b0b",
+    "dimensions": [
+      2022,
+      778
+    ]
+  },
+  "assets/map/dps-desktop-2022.webp": {
+    "bytes": 363238,
+    "sha256": "afcd924f34bece31338e2f77b5a4adb60f326676213a14b4ba0eb03c4544b95c",
+    "dimensions": [
+      2022,
+      778
+    ]
+  },
+  "assets/map/dps-desktop-800.avif": {
+    "bytes": 32680,
+    "sha256": "3887f757120a40c563c0a44650f8325e54f7f2434936f5f6760a8c9e2a11300a",
+    "dimensions": [
+      800,
+      308
+    ]
+  },
+  "assets/map/dps-desktop-800.jpg": {
+    "bytes": 78642,
+    "sha256": "a19da6622b3b495d29744eaa2257a872aac4cff34bf8a7c27593aff69a485207",
+    "dimensions": [
+      800,
+      308
+    ]
+  },
+  "assets/map/dps-desktop-800.webp": {
+    "bytes": 71708,
+    "sha256": "8950ecba099a5e351992ea324f9a56917b6df38fc4ec818d8506b8a91bb50cf2",
+    "dimensions": [
+      800,
+      308
+    ]
+  },
+  "assets/map/dps-mobile-480.avif": {
+    "bytes": 12846,
+    "sha256": "77c69de69be19ff415dde79ba24ab5a0ee43be6f73df89c37ceea0e4c0150414",
+    "dimensions": [
+      480,
+      185
+    ]
+  },
+  "assets/map/dps-mobile-480.jpg": {
+    "bytes": 30342,
+    "sha256": "a2f2653974c50a6f09acca43c838394d2c99a124a9248f0a290d84920c717a1c",
+    "dimensions": [
+      480,
+      185
+    ]
+  },
+  "assets/map/dps-mobile-480.webp": {
+    "bytes": 27820,
+    "sha256": "f7e9691a2c8830129866fec6b7a19de58bd26d353ed092e44962b3afcbecb41b",
+    "dimensions": [
+      480,
+      185
+    ]
+  },
+  "assets/map/dps-mobile-800.avif": {
+    "bytes": 32680,
+    "sha256": "3887f757120a40c563c0a44650f8325e54f7f2434936f5f6760a8c9e2a11300a",
+    "dimensions": [
+      800,
+      308
+    ]
+  },
+  "assets/map/dps-mobile-800.jpg": {
+    "bytes": 78642,
+    "sha256": "a19da6622b3b495d29744eaa2257a872aac4cff34bf8a7c27593aff69a485207",
+    "dimensions": [
+      800,
+      308
+    ]
+  },
+  "assets/map/dps-mobile-800.webp": {
+    "bytes": 71708,
+    "sha256": "8950ecba099a5e351992ea324f9a56917b6df38fc4ec818d8506b8a91bb50cf2",
+    "dimensions": [
+      800,
+      308
+    ]
+  },
+  "assets/map/hero-desktop-1440.avif": {
+    "bytes": 93295,
+    "sha256": "33b851352015328808b57468d037969fea778cca1556aa8d9557fb4412b2e31c",
+    "dimensions": [
+      1440,
+      576
+    ]
+  },
+  "assets/map/hero-desktop-1440.jpg": {
+    "bytes": 222804,
+    "sha256": "24bc39c54263bddc5133a66bc1822b594fa5414ac523dbc3134c055a9fddb767",
+    "dimensions": [
+      1440,
+      576
+    ]
+  },
+  "assets/map/hero-desktop-1440.webp": {
+    "bytes": 190236,
+    "sha256": "6a24cb0107e3b55d107b7316763dbd79c3aac81b689216408451591997a4567f",
+    "dimensions": [
+      1440,
+      576
+    ]
+  },
+  "assets/map/hero-desktop-1983.avif": {
+    "bytes": 156408,
+    "sha256": "1cf04fb45191824efdc77465b2d0881f4d6b506cced76431a5af6e7bc6cb4bb5",
+    "dimensions": [
+      1983,
+      793
+    ]
+  },
+  "assets/map/hero-desktop-1983.jpg": {
+    "bytes": 383811,
+    "sha256": "1a1a2eed9705c7518d26d06cc2ba6823d75251a40053a19c00e464fe27fa4287",
+    "dimensions": [
+      1983,
+      793
+    ]
+  },
+  "assets/map/hero-desktop-1983.webp": {
+    "bytes": 309796,
+    "sha256": "b4cc4ebfe7cee923df7ac5deff9f0c5190626ad0d1e3ccaebd2e55b5a482e7b2",
+    "dimensions": [
+      1983,
+      793
+    ]
+  },
+  "assets/map/hero-desktop-800.avif": {
+    "bytes": 31868,
+    "sha256": "8df6579da46fc98b3c72295e585f45abe535360fd60eb9099224207fb737ce5b",
+    "dimensions": [
+      800,
+      320
+    ]
+  },
+  "assets/map/hero-desktop-800.jpg": {
+    "bytes": 75679,
+    "sha256": "637f8c4ad0c6af601b00521ea90400bfa45de5991918a0c753dfa7f9ff9ef827",
+    "dimensions": [
+      800,
+      320
+    ]
+  },
+  "assets/map/hero-desktop-800.webp": {
+    "bytes": 67926,
+    "sha256": "6c7f131779c4a4d5e514ec0a65d1c8ab1dc8c9c8156bfcd7592a8bbe6530523a",
+    "dimensions": [
+      800,
+      320
+    ]
+  },
+  "assets/map/hero-mobile-480.avif": {
+    "bytes": 48577,
+    "sha256": "28a0fa47c8fd0c2e2884b5a9dfc9002e86de78cabde142b8925447127615ed58",
+    "dimensions": [
+      480,
+      640
+    ]
+  },
+  "assets/map/hero-mobile-480.jpg": {
+    "bytes": 112142,
+    "sha256": "889725e80e824b8038266119714337bd55b49333f0a366a8092d5a0b751c8a2b",
+    "dimensions": [
+      480,
+      640
+    ]
+  },
+  "assets/map/hero-mobile-480.webp": {
+    "bytes": 108932,
+    "sha256": "9c01690a7d88e165073e6562cfc929281408c97cf7acd80bf9921c19a98319bd",
+    "dimensions": [
+      480,
+      640
+    ]
+  },
+  "assets/map/hero-mobile-800.avif": {
+    "bytes": 128301,
+    "sha256": "2c62d6188331c6f40b7b6f6702dafc170800013e9be6c4a9a8724ffbec4faf5f",
+    "dimensions": [
+      800,
+      1067
+    ]
+  },
+  "assets/map/hero-mobile-800.jpg": {
+    "bytes": 295370,
+    "sha256": "fe8eab615e9de288e24e6d9d8ba7692ccff61c9d6de8fc13aa92b74f33bcdd7d",
+    "dimensions": [
+      800,
+      1067
+    ]
+  },
+  "assets/map/hero-mobile-800.webp": {
+    "bytes": 282142,
+    "sha256": "d1f15215ac46b8b996a0ecd6ead6bd58eace2f19c7745efb1d66d13975b5b037",
+    "dimensions": [
+      800,
+      1067
+    ]
+  },
+  "assets/map/huts-desktop-1440.avif": {
+    "bytes": 112603,
+    "sha256": "c7efab718e7ecdd112bb0eb9583c26aa5f9e7a0e00e8bb10df672bb61cf91c07",
+    "dimensions": [
+      1440,
+      554
+    ]
+  },
+  "assets/map/huts-desktop-1440.jpg": {
+    "bytes": 263281,
+    "sha256": "3b6cd7bc64c60fd9a73b3b42a922d1677a67d203b1a19cb65d92bd7574c34b94",
+    "dimensions": [
+      1440,
+      554
+    ]
+  },
+  "assets/map/huts-desktop-1440.webp": {
+    "bytes": 237842,
+    "sha256": "2943c2e98259d1a4d68241c4a2052f47940a92b53d833fe91718eb8472c14ad1",
+    "dimensions": [
+      1440,
+      554
+    ]
+  },
+  "assets/map/huts-desktop-2021.avif": {
+    "bytes": 191094,
+    "sha256": "912785824a7505e70e66fb903f7e1fe5bcaa376a2ee771dc9ea89240cf7f822f",
+    "dimensions": [
+      2021,
+      778
+    ]
+  },
+  "assets/map/huts-desktop-2021.jpg": {
+    "bytes": 466651,
+    "sha256": "9b750ef93e938e5e2b94c6173ab54f9f07c8b6167ee43c185e19f499c0a06bc1",
+    "dimensions": [
+      2021,
+      778
+    ]
+  },
+  "assets/map/huts-desktop-2021.webp": {
+    "bytes": 412794,
+    "sha256": "d6e800edfadc4afa4a973fd6032e8188c04c816d62e96db0496802cf89a3fc88",
+    "dimensions": [
+      2021,
+      778
+    ]
+  },
+  "assets/map/huts-desktop-800.avif": {
+    "bytes": 37278,
+    "sha256": "50766032b2cc5e90e91dc75df57aab30fe9e01aaa8063ac01209f66505453daf",
+    "dimensions": [
+      800,
+      308
+    ]
+  },
+  "assets/map/huts-desktop-800.jpg": {
+    "bytes": 88072,
+    "sha256": "d1da9e8b6d8893eda9bc43323076a8191070dcba5b28b936eb1f1948839848b9",
+    "dimensions": [
+      800,
+      308
+    ]
+  },
+  "assets/map/huts-desktop-800.webp": {
+    "bytes": 82128,
+    "sha256": "aa58cf58ae68a19fe17b63c0ef785bc8b7334a938bc98a4bc58eb96cae7f8936",
+    "dimensions": [
+      800,
+      308
+    ]
+  },
+  "assets/map/huts-mobile-480.avif": {
+    "bytes": 51677,
+    "sha256": "4895f3b5ea82450042223ce5e1f3659277cc3052d52512ba0315767ea3ff146b",
+    "dimensions": [
+      480,
+      640
+    ]
+  },
+  "assets/map/huts-mobile-480.jpg": {
+    "bytes": 119415,
+    "sha256": "c61712cbba5cccd8110c524660e37d03e795287d7d5cee5960355d1c5905a0aa",
+    "dimensions": [
+      480,
+      640
+    ]
+  },
+  "assets/map/huts-mobile-480.webp": {
+    "bytes": 117382,
+    "sha256": "75236eddfdceae97b9753c1fa4f5ea27bd4128e1a360aa812fb8855fb4e9d16e",
+    "dimensions": [
+      480,
+      640
+    ]
+  },
+  "assets/map/huts-mobile-800.avif": {
+    "bytes": 134020,
+    "sha256": "0a1705aa7f8401847d2d68db7708350365dc459c18c7ab872f11589268adf1f6",
+    "dimensions": [
+      800,
+      1067
+    ]
+  },
+  "assets/map/huts-mobile-800.jpg": {
+    "bytes": 309904,
+    "sha256": "47dd2def5b64025c85cbb5286dc48dbfadedf4a83cd18ed9dd604357dc08f5b4",
+    "dimensions": [
+      800,
+      1067
+    ]
+  },
+  "assets/map/huts-mobile-800.webp": {
+    "bytes": 298102,
+    "sha256": "46cb406b5030b9928e27950a510f8394f8dee21b88b496d0a9cb257fbe46c58c",
+    "dimensions": [
+      800,
+      1067
+    ]
+  },
+  "assets/map/region.svg": {
+    "bytes": 212445,
+    "sha256": "4378765f633adc2b3fff6d73ab647ad95833ef53d1e5496bfe5b5e75ffe99221"
+  },
+  "assets/map/road-desktop-1440.avif": {
+    "bytes": 187658,
+    "sha256": "bde67e566d11126200a29e046320cf9c4a5890e84d73581dab8fbd91797987b8",
+    "dimensions": [
+      1440,
+      720
+    ]
+  },
+  "assets/map/road-desktop-1440.jpg": {
+    "bytes": 428229,
+    "sha256": "44ee17c4407e4317f5d277c7a605a5f1d8760298e09dfe5c6511616d5d4bbab9",
+    "dimensions": [
+      1440,
+      720
+    ]
+  },
+  "assets/map/road-desktop-1440.webp": {
+    "bytes": 423682,
+    "sha256": "5a20259b411f992b43f588ed2484d42344cbf7dc0eba401a516c64e6f415893f",
+    "dimensions": [
+      1440,
+      720
+    ]
+  },
+  "assets/map/road-desktop-1774.avif": {
+    "bytes": 258494,
+    "sha256": "516c4f500bc19945d3ee173fe7a507063d2842ccdfc668d4603146cdf33ac20c",
+    "dimensions": [
+      1774,
+      887
+    ]
+  },
+  "assets/map/road-desktop-1774.jpg": {
+    "bytes": 611824,
+    "sha256": "5da7247084045133ea290a15626acbc3e9a7fffe9cb57b3a2902d0d154b8651c",
+    "dimensions": [
+      1774,
+      887
+    ]
+  },
+  "assets/map/road-desktop-1774.webp": {
+    "bytes": 611780,
+    "sha256": "27b3d66cd2f09a4c10b730dc332b375286654860cac5b1e4b3a8ab1ee22093a9",
+    "dimensions": [
+      1774,
+      887
+    ]
+  },
+  "assets/map/road-desktop-800.avif": {
+    "bytes": 62887,
+    "sha256": "bffea921813bc11096d46988d6db93c879f905af41d399fa585cd7a1ab950618",
+    "dimensions": [
+      800,
+      400
+    ]
+  },
+  "assets/map/road-desktop-800.jpg": {
+    "bytes": 141037,
+    "sha256": "0e14c200ab61c967a4c6ae9f28a43826bc6da1107abfe5007968fd52a92094bf",
+    "dimensions": [
+      800,
+      400
+    ]
+  },
+  "assets/map/road-desktop-800.webp": {
+    "bytes": 141798,
+    "sha256": "d4409723473ddb9d05a1e25933452ab10d90d712128ca1eb29844555d6071803",
+    "dimensions": [
+      800,
+      400
+    ]
+  },
+  "assets/map/road-mobile-480.avif": {
+    "bytes": 22156,
+    "sha256": "875066102a008ed469583c107cd7ee045d80d78e851e432db50b1dd2426f39d4",
+    "dimensions": [
+      480,
+      240
+    ]
+  },
+  "assets/map/road-mobile-480.jpg": {
+    "bytes": 50157,
+    "sha256": "e7f9130849ab2e91f545c9ace8b152c4dbc062ac730cdfa96781e2c1e5a31360",
+    "dimensions": [
+      480,
+      240
+    ]
+  },
+  "assets/map/road-mobile-480.webp": {
+    "bytes": 50488,
+    "sha256": "0f6ee7733a74b70428f61cf40266d01d569e0ce8c0e559823352daa4fe26e329",
+    "dimensions": [
+      480,
+      240
+    ]
+  },
+  "assets/map/road-mobile-800.avif": {
+    "bytes": 62887,
+    "sha256": "bffea921813bc11096d46988d6db93c879f905af41d399fa585cd7a1ab950618",
+    "dimensions": [
+      800,
+      400
+    ]
+  },
+  "assets/map/road-mobile-800.jpg": {
+    "bytes": 141037,
+    "sha256": "0e14c200ab61c967a4c6ae9f28a43826bc6da1107abfe5007968fd52a92094bf",
+    "dimensions": [
+      800,
+      400
+    ]
+  },
+  "assets/map/road-mobile-800.webp": {
+    "bytes": 141798,
+    "sha256": "d4409723473ddb9d05a1e25933452ab10d90d712128ca1eb29844555d6071803",
+    "dimensions": [
+      800,
+      400
+    ]
+  },
+  "assets/map/social.jpg": {
+    "bytes": 213973,
+    "sha256": "b5a5ec773d8e0f0093a51bbdc4edde72f9a97e71d8686a634ae11f7008f652ea",
+    "dimensions": [
+      1200,
+      630
+    ]
+  },
+  "assets/map/terrace-desktop-1440.avif": {
+    "bytes": 57964,
+    "sha256": "e48f9736cecc91234cf5e4ce54eea391a9e9c6cae9f20ea2b0456094a91dd604",
+    "dimensions": [
+      1440,
+      576
+    ]
+  },
+  "assets/map/terrace-desktop-1440.jpg": {
+    "bytes": 167035,
+    "sha256": "e51b2bb724e62ce5520b42de53b3eb424d1bac37ebc7eaf335a99d0396885b67",
+    "dimensions": [
+      1440,
+      576
+    ]
+  },
+  "assets/map/terrace-desktop-1440.webp": {
+    "bytes": 124180,
+    "sha256": "5033493aff04ddafc60d0b26dea91624f8d6be2c2094e7a88f74e2a948057d45",
+    "dimensions": [
+      1440,
+      576
+    ]
+  },
+  "assets/map/terrace-desktop-1983.avif": {
+    "bytes": 93388,
+    "sha256": "1698f0c36115709cb5b87303d159b6595b069de419076fa6c6417c4aefdfd11a",
+    "dimensions": [
+      1983,
+      793
+    ]
+  },
+  "assets/map/terrace-desktop-1983.jpg": {
+    "bytes": 280467,
+    "sha256": "cded5aacb923dad60129a2ffb03c4448dc1f55f9ffeb2973a99f6482d11788bb",
+    "dimensions": [
+      1983,
+      793
+    ]
+  },
+  "assets/map/terrace-desktop-1983.webp": {
+    "bytes": 198550,
+    "sha256": "b542f98b7032cbfc9b6847d467e95d3ed4bd1b6befb334df363fdd89a520552d",
+    "dimensions": [
+      1983,
+      793
+    ]
+  },
+  "assets/map/terrace-desktop-800.avif": {
+    "bytes": 22725,
+    "sha256": "b77de9d64ca8479ee65bea747eb8a77b5dcce4c8ed383c7acee573e9faf80a83",
+    "dimensions": [
+      800,
+      320
+    ]
+  },
+  "assets/map/terrace-desktop-800.jpg": {
+    "bytes": 61522,
+    "sha256": "1c2c5b6ed92ca55c909640f519223a3dde3238e828696df017680c6f27e991f9",
+    "dimensions": [
+      800,
+      320
+    ]
+  },
+  "assets/map/terrace-desktop-800.webp": {
+    "bytes": 49988,
+    "sha256": "cc00f7c893b30c7ad3a9c0d4287a7ff9c71a0772ecf799bc2918eb26a15be2f2",
+    "dimensions": [
+      800,
+      320
+    ]
+  },
+  "assets/map/terrace-mobile-480.avif": {
+    "bytes": 11322,
+    "sha256": "7b37c83d74ceaef96b3696da96d8907707b338970424678065d48269d4b8c9af",
+    "dimensions": [
+      480,
+      192
+    ]
+  },
+  "assets/map/terrace-mobile-480.jpg": {
+    "bytes": 29925,
+    "sha256": "cdebb1524b01148cac08285d01de43817af00b08c085ea2bea4c34c918a0a243",
+    "dimensions": [
+      480,
+      192
+    ]
+  },
+  "assets/map/terrace-mobile-480.webp": {
+    "bytes": 25888,
+    "sha256": "e1b808c8ac3213455f968f8ce6049331bc3df21b6fa8fbb01293f512425fa542",
+    "dimensions": [
+      480,
+      192
+    ]
+  },
+  "assets/map/terrace-mobile-800.avif": {
+    "bytes": 28885,
+    "sha256": "0ddd25425dd8c4bba30d4e0a112ff06d5e17ac0190135eeb47582f2ab6dc2ace",
+    "dimensions": [
+      800,
+      320
+    ]
+  },
+  "assets/map/terrace-mobile-800.jpg": {
+    "bytes": 77061,
+    "sha256": "f37cac0e233202dc9dcd5840797a2aa5faf4f23a4ebd0eec4fac0e2e6a1d5c04",
+    "dimensions": [
+      800,
+      320
+    ]
+  },
+  "assets/map/terrace-mobile-800.webp": {
+    "bytes": 66560,
+    "sha256": "d24fdb5beee6eec710199a51d65abf20e052cc2077bbfb17c0458f4965463c96",
+    "dimensions": [
+      800,
+      320
+    ]
+  },
+  "assets/upstream/LUCIDE-LICENSE.txt": {
+    "bytes": 3208,
+    "sha256": "b495047bd93a9b06913511076f504daba17d5bbeb3e0650f3bb53a4220329c57"
+  },
+  "assets/upstream/organic-maps.svg": {
+    "bytes": 2092,
+    "sha256": "b391c1bd8c1e1e991da3aa9c3a3dfb2e09d0b68f446dcb543a9dd123fd110dfa"
+  },
+  "masters/bridge.png": {
+    "bytes": 3623079,
+    "sha256": "8ce1d8d0b128bb209713ced5e5a4809603c11012d2e2c93c0986a59695885868",
+    "dimensions": [
+      2060,
+      763
+    ]
+  },
+  "masters/closing.png": {
+    "bytes": 3157835,
+    "sha256": "73441a5d294be0fd52f42d5dd72bf6e9aca51bcd16ebb47c159ccba3029898db",
+    "dimensions": [
+      2172,
+      724
+    ]
+  },
+  "masters/design-reference.png": {
+    "bytes": 2941627,
+    "sha256": "cd5e75036358700d59d2d511cf44fa5c3dee645405e14db02ce7d6a1bc49f77d",
+    "dimensions": [
+      772,
+      2036
+    ]
+  },
+  "masters/dps.png": {
+    "bytes": 3158623,
+    "sha256": "ed4d6c339e81cc8a0789d191d80f9ddf1adee1967ec7930a70cc4af1a090001a",
+    "dimensions": [
+      2022,
+      778
+    ]
+  },
+  "masters/generation.json": {
+    "bytes": 7152,
+    "sha256": "676fe9b9d962f08c17c0bf0085d004f0863af0e133f4e4be17fefe74894d786d"
+  },
+  "masters/hero-mobile.png": {
+    "bytes": 3576553,
+    "sha256": "16f1c7c3c9efbab4d2b5f16550741e70f035cfc46299819af2885d3153a83679",
+    "dimensions": [
+      1086,
+      1448
+    ]
+  },
+  "masters/hero.png": {
+    "bytes": 3001049,
+    "sha256": "f7f20c81c6b61cbf9b7d3ce2e22da5d8ba9c9058015c66fd7fd4391b2a93af00",
+    "dimensions": [
+      1983,
+      793
+    ]
+  },
+  "masters/huts-mobile.png": {
+    "bytes": 3647542,
+    "sha256": "e963d99234d76ebf1d7bb7d46fea9b7ec769618c376d4af5fd026efb9223d7b8",
+    "dimensions": [
+      1086,
+      1448
+    ]
+  },
+  "masters/huts.png": {
+    "bytes": 3359698,
+    "sha256": "91323188e129ed6c00d8e43458cc6473c55ac55d37d9fa5b3fcff1b20bfb7dc1",
+    "dimensions": [
+      2021,
+      778
+    ]
+  },
+  "masters/icons/arrow-right.svg": {
+    "bytes": 261,
+    "sha256": "288397fdb73bb4f783cf9eabb726ff47357df1d4e3f1201dd748090579f108b9"
+  },
+  "masters/icons/car.svg": {
+    "bytes": 486,
+    "sha256": "6d70bc146ca53b9c140a859319df471616c1ee6758bfb31a346d549d1fe92211"
+  },
+  "masters/icons/check.svg": {
+    "bytes": 239,
+    "sha256": "7f33acc9a77a61659531044525fc008edebe215bf4dcf1c789c8674ad3277db0"
+  },
+  "masters/icons/clock-3.svg": {
+    "bytes": 269,
+    "sha256": "0e097d0b66278965fb53bc14900575d95f5c21b9cca932028bbb33294b56c9e2"
+  },
+  "masters/icons/compass.svg": {
+    "bytes": 351,
+    "sha256": "c5a4d147bf48424f48b514712dd61c1b07cb689612a7baef87c88870092c1659"
+  },
+  "masters/icons/download.svg": {
+    "bytes": 318,
+    "sha256": "3daeee13ded5a3afa2198b1bb4e2262d163922f97d96ac6ff9953e8ed4fe039d"
+  },
+  "masters/icons/footprints.svg": {
+    "bytes": 520,
+    "sha256": "09ddd9fd4ac7cebfdc91e1096f7b75db019a42fffc493c4adb128a49e1dba04f"
+  },
+  "masters/icons/house.svg": {
+    "bytes": 383,
+    "sha256": "28216c479005731ef5e382e7d8627eda2b129b019eb1f3d9de9f5915576d448e"
+  },
+  "masters/icons/layers.svg": {
+    "bytes": 510,
+    "sha256": "ce16d0a955e3581cda17f6b2fd5c5bc2034b405f9cecc31c8ebb8495b4afc1bb"
+  },
+  "masters/icons/locate-fixed.svg": {
+    "bytes": 446,
+    "sha256": "3a10953374c6e811d8da564f87943cf52f47e284c6173ff211ffedc083b90430"
+  },
+  "masters/icons/lock-keyhole.svg": {
+    "bytes": 337,
+    "sha256": "fc0b8b7590d1d9e9bb0112c5c2e15a78ade0bfeca6d6f8c79fbbe149236d74be"
+  },
+  "masters/icons/map-pin.svg": {
+    "bytes": 359,
+    "sha256": "16f1042a62f1bda20ebab8bfc1cb79c0be285c980dea6c2c733a17902631405b"
+  },
+  "masters/icons/map.svg": {
+    "bytes": 516,
+    "sha256": "41300a8ef2c2a4cf36ec3f8a730bcb4754543889eb23b98e7435de7a0757752d"
+  },
+  "masters/icons/minus.svg": {
+    "bytes": 232,
+    "sha256": "a0c743ab6dbf545d8a6e19ef3874f48ede686ce68d25e231bd81f540d97b1f19"
+  },
+  "masters/icons/mountain.svg": {
+    "bytes": 248,
+    "sha256": "fced3dd3ffb1472e62a13d92e72633e9c68a4655da3d8aa801bc65a041fe64be"
+  },
+  "masters/icons/navigation.svg": {
+    "bytes": 258,
+    "sha256": "3c1adf655f06c733013ddf00848c3efe905ed70d7b3eba7a6be5e60e65880503"
+  },
+  "masters/icons/plus.svg": {
+    "bytes": 256,
+    "sha256": "7f6af73bf1ff6c4bca3f18351c8d1bdec6749c0c2530c4de5da85d520c21df17"
+  },
+  "masters/icons/radio-tower.svg": {
+    "bytes": 485,
+    "sha256": "d5d2728425fe115bed9f309c03b9dd1e2b7483a9242df87966c37e36ee3381cf"
+  },
+  "masters/icons/satellite.svg": {
+    "bytes": 667,
+    "sha256": "542eb41b2ea31f42b4bd7992cecdff22a8a4f1c21275036bc3537c64efee8481"
+  },
+  "masters/icons/search.svg": {
+    "bytes": 275,
+    "sha256": "283d371c2e433817bb9c0c8310caa6c77fa4177c0f4f1168d9c83b97af7389dc"
+  },
+  "masters/icons/shield-check.svg": {
+    "bytes": 415,
+    "sha256": "8d4fcdbde5bba4abb1a2f6fe53e37ceb6343a1d5449a9d88f6f97c1971d26c4e"
+  },
+  "masters/icons/shield-off.svg": {
+    "bytes": 484,
+    "sha256": "142aeb6dd57bb8f94d993224946a8deafa375f5e2d511c427984a850bf188145"
+  },
+  "masters/icons/sliders-horizontal.svg": {
+    "bytes": 422,
+    "sha256": "e43a00e5eb684e6cbb61083bed2528d7a3fa5f265693eb2b5f314cd432aa65f4"
+  },
+  "masters/icons/smartphone.svg": {
+    "bytes": 294,
+    "sha256": "f9fdb700b50feb5fc6436f53eb9813e9eb56a9071ac4cdcba69c7f7c1c13877d"
+  },
+  "masters/icons/star.svg": {
+    "bytes": 588,
+    "sha256": "c59da86b889569387db28e69ad00a89f96af22863ad9eea9aa12c4876a14338c"
+  },
+  "masters/icons/wifi.svg": {
+    "bytes": 357,
+    "sha256": "5c4c795d014fa95d1e1038362df44a0f0f32ded9cb08c833ae72419ebadc9a91"
+  },
+  "masters/road.png": {
+    "bytes": 4279128,
+    "sha256": "52c9a6dcca343fdf753b0a479de6d72496d8659ed4f81f557c5d12cd1829e994",
+    "dimensions": [
+      1774,
+      887
+    ]
+  },
+  "masters/social.html": {
+    "bytes": 627,
+    "sha256": "80b46f16d7ba9cc69d84bd25d6e340d45cd4ff489c8affca185b89255cee901b"
+  },
+  "masters/terrace-mobile.png": {
+    "bytes": 2745588,
+    "sha256": "a104c324f7a844cfe8b6a99d44ebf881915780e9bf155a0bb71845fd49a7374a",
+    "dimensions": [
+      1983,
+      793
+    ]
+  },
+  "masters/terrace.png": {
+    "bytes": 2275992,
+    "sha256": "7ffdf5316f51c838f6370618783d858e1923e14c73cc9edd2188afe18f740fd5",
+    "dimensions": [
+      1983,
+      793
+    ]
+  }
+}

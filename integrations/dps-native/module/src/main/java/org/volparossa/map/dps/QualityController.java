@@ -50,7 +50,19 @@ public final class QualityController implements AutoCloseable {
         long now = clock.elapsedMs();
         return !closed && foreground && enabled && g == generation && now >= 0 && now < deadline;
     }
-    public void foreground() { ui(); synchronized (lock) { if (!closed) foreground = true; } }
+    public void foreground() {
+        ui();
+        synchronized (lock) { if (!closed) foreground = true; }
+        refreshExpiry();
+    }
+    /** Handler uptime pauses during sleep, while the consent deadline continues to elapse. */
+    public void refreshExpiry() {
+        ui();
+        synchronized (lock) {
+            if (!enabled || authorized(generation)) return;
+        }
+        revoke();
+    }
     /** Explicit choice; resume never silently grants a new generation. */
     public boolean enable(boolean consent, long ttlMs) {
         ui();
@@ -78,7 +90,7 @@ public final class QualityController implements AutoCloseable {
         revoke();
     }
     public boolean submit(byte[] request, long nowUnixMs) {
-        ui();
+        refreshExpiry();
         synchronized (lock) {
             if (!authorized(generation) || busy || request == null || request.length < 1
                     || request.length > NativeQuality.MAX_INPUT || nowUnixMs <= 0) return false;

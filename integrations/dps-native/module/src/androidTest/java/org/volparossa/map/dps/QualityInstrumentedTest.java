@@ -2,6 +2,7 @@
 package org.volparossa.map.dps;
 
 import static org.junit.Assert.*;
+import android.app.AlertDialog;
 import android.app.Instrumentation;
 import android.content.Context;
 import android.content.Intent;
@@ -13,6 +14,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4;
 import java.io.InputStream;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
@@ -137,6 +139,34 @@ public final class QualityInstrumentedTest {
         } finally { ui(c::close); }
         assertTrue(c.awaitTermination(3000));
 
+        // Advance elapsed time without advancing the Handler's uptime. On wake a
+        // previously displayed result must disappear within the current UI callback.
+        clock.set(0);
+        ui(() -> owner.set(new QualityController(shown::set, clock::get, NativeQuality::assess)));
+        QualityController waking = owner.get();
+        try {
+            for (int event = 0; event < 3; ++event) {
+                int trigger = event;
+                ui(() -> {
+                    waking.foreground();
+                    assertTrue(waking.enable(true, QualityController.MAX_TTL_MS));
+                    assertTrue(waking.submit(good, 1_000_000));
+                });
+                waitUntil(() -> shown.get() != null);
+                ui(() -> {
+                    waking.refreshExpiry();
+                    assertNotNull(shown.get());
+                    clock.addAndGet(QualityController.MAX_TTL_MS);
+                    if (trigger == 0) waking.refreshExpiry();
+                    else if (trigger == 1) waking.foreground();
+                    else assertFalse(waking.submit(good, 1_000_000));
+                    assertNull(shown.get());
+                    assertFalse(waking.submit(good, 1_000_000));
+                });
+            }
+        } finally { ui(waking::close); }
+        assertTrue(waking.awaitTermination(3000));
+
         ui(() -> owner.set(new QualityController(shown::set)));
         final QualityController live = owner.get();
         try {
@@ -237,6 +267,7 @@ public final class QualityInstrumentedTest {
         QualityController controller = activity.controller;
         byte[] good = vector("relative_consistent");
         AtomicReference<String> text = new AtomicReference<>();
+        AtomicReference<AlertDialog> dialog = new AtomicReference<>();
         try {
             ui(() -> {
                 assertEquals(QualityActivity.UNAVAILABLE, activity.quality.getText().toString());
@@ -261,8 +292,42 @@ public final class QualityInstrumentedTest {
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)));
             waitUntil(() -> activity.starts >= 2);
             ui(() -> assertFalse(controller.submit(good, 1_000_000)));
-        } finally { ui(activity::finish); }
+
+            // Keep the real Activity started under a dialog. Only the elapsed
+            // clock advances; the actual window focus callback must clear the view.
+            AtomicLong elapsed = new AtomicLong(0);
+            ui(() -> {
+                controller.close();
+                activity.controller = new QualityController(activity::showQuality, elapsed::get, NativeQuality::assess);
+                activity.controller.foreground();
+                activity.enable.performClick(); activity.assess.performClick();
+            });
+            waitUntil(() -> { ui(() -> text.set(activity.quality.getText().toString())); return text.get().contains("Consistent claims"); });
+            ui(() -> dialog.set(new AlertDialog.Builder(activity)
+                    .setMessage("Synthetic focus test").show()));
+            AtomicBoolean dialogFocused = new AtomicBoolean();
+            waitUntil(() -> {
+                ui(() -> dialogFocused.set(dialog.get().getWindow().getDecorView().hasWindowFocus()));
+                return dialogFocused.get();
+            });
+            ui(() -> {
+                assertFalse(activity.hasWindowFocus());
+                elapsed.set(QualityController.MAX_TTL_MS);
+                dialog.get().dismiss();
+            });
+            waitUntil(() -> {
+                ui(() -> text.set(activity.hasWindowFocus() ? activity.quality.getText().toString() : ""));
+                return QualityActivity.UNAVAILABLE.contentEquals(text.get());
+            });
+            ui(() -> assertFalse(activity.controller.submit(good, 1_000_000)));
+        } finally {
+            ui(() -> {
+                if (dialog.get() != null && dialog.get().isShowing()) dialog.get().dismiss();
+                activity.finish();
+            });
+        }
         waitUntil(activity::isDestroyed);
         assertTrue(controller.awaitTermination(3000));
+        assertTrue(activity.controller.awaitTermination(3000));
     }
 }

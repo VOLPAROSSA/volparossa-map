@@ -66,7 +66,6 @@ def build(output, production):
     shutil.copy2(THEME/'favicon.ico',output/'favicon.ico')
     shutil.copy2(THEME/'LICENSE',output/'LICENSE')
     (output/'credits').mkdir()
-    shutil.copy2(ROOT/'src/credits.html',output/'credits/index.html')
 
     spec = importlib.util.spec_from_file_location('nav',THEME/'shared/navigation.py')
     navlib = importlib.util.module_from_spec(spec)
@@ -80,6 +79,8 @@ def build(output, production):
         values[key] = navlib.navigation_links(nav[group],links,active='applications',github_icon=github,footer=group=='footer')
     for part in ('header','footer'):
         values[part] = render((THEME/f'templates/{part}.html').read_text(),values)
+    credits_header = render((THEME/'templates/header.html').read_text(), {**values, 'root':'../'})
+    (output/'credits/index.html').write_text(render((ROOT/'src/credits.html').read_text(), {'header':credits_header}))
     variants = json.loads((ROOT/'src/variants.json').read_text())
     for name in variants:
         sizes = '100vw' if name in ('hero','closing','huts') else '(max-width:800px) 100vw, 47vw' if name=='road' else '(max-width:800px) 100vw, 68vw'

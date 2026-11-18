@@ -1,6 +1,6 @@
 # VOLPAROSSA Map website
 
-The Mountain Passes is the English project page for [VOLPAROSSA Map](https://volparossa.org/volparossa-map/). It uses the shared theme 1.0.3 exported from the central site at `a897eb6725ec7f9df4c1733131c69445adfbd651`. The ordinary offline build uses the Python standard library and committed illustrations.
+The Mountain Passes is the English project page for [VOLPAROSSA Map](https://volparossa.org/volparossa-map/). It uses the shared theme 1.1.0 exported from the central site at `991cf1638c906226574b9c21bb32c6618fc07fb7`. The ordinary offline build uses the Python standard library and committed illustrations.
 
 ## Local preview
 

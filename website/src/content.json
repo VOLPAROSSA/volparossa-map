@@ -7,5 +7,5 @@
   "dps_url": "https://github.com/VOLPAROSSA/volparossa-map/blob/main/docs/DPS_INTEGRATION.md",
   "traffic_evidence": "https://github.com/VOLPAROSSA/volparossa-map/blob/95a83c2869858aa90d04b60bf0bca63274397520/docs/TRAFFIC_ADAPTER.md",
   "dps_evidence": "https://github.com/VOLPAROSSA/volparossa-map/blob/95a83c2869858aa90d04b60bf0bca63274397520/docs/DPS_INTEGRATION.md#accepted-bounded-synthetic-debug-activityjni-checkpoint",
-  "theme_commit": "a897eb6725ec7f9df4c1733131c69445adfbd651"
+  "theme_commit": "991cf1638c906226574b9c21bb32c6618fc07fb7"
 }

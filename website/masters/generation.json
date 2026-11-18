@@ -1,0 +1,62 @@
+[
+  {
+    "name": "hero",
+    "reference": "design-reference.png (hero)",
+    "master": "hero.png",
+    "prompt": "Panoramic 2.5:1. Reconstruct the exact photographic landscape, fox and red-white trail marker as shown. A full natural red fox in right-facing profile on a rocky ledge just right of centre (x65%), its four believable legs and single trailing bushy tail visible. Marker x73%. Keep the RIGHTMOST 21% clear foreground rock for a separately composited upright phone. Keep left 44% calm shaded hillside with old stone viaduct visible centre-left, sunset-peach alpine sunrise and luminous valley like reference. REMOVE phone entirely, REMOVE ALL TEXT and UI and borders. Retain exact mountain perspective. Do not put any screen into the scene."
+  },
+  {
+    "name": "hero-mobile",
+    "reference": "design-reference.png (hero)",
+    "master": "hero-mobile.png",
+    "prompt": "Portrait 3:4 art direction from this reference: view over an alpine pass at sunrise, prominent stone viaduct in mid-distance, natural full-length red fox on the left-middle foreground beside a red-white marked trail stone. Leave open rock on lower right for a separate map phone. Full fox, single bushy tail, four anatomically correct legs. No phone, map, screen, labels, writing, banner, typography or graphic UI."
+  },
+  {
+    "name": "huts",
+    "reference": "design-reference.png (mesh)",
+    "master": "huts.png",
+    "prompt": "Panorama 2.6:1, faithful alpine mountain landscape reconstructed from reference. Exactly six distinct wooden stone chalets on grassy terraces with doors visible, distinct clear locations, three smaller rear huts near x28% y52%, x55% y37%, x85% y44%; three closer terraces x14% y76%, x59% y78%, x87% y71%. First foreground hut down left like reference. Recognisable chalet wood and stone. Midrange mountains recede through green forest, white Alps and blue sky, calm upper quarter for live typography. Separate slopes between roofs. No graphics, NO map cards, wires, glows, writing or overlays. Put interest across the width."
+  },
+  {
+    "name": "huts-mobile",
+    "reference": "design-reference.png (mesh)",
+    "master": "huts-mobile.png",
+    "prompt": "Vertical portrait 3:4 alpine valley, matching same morning light, green and limestone. Exactly six separate distinctly visible timber and stone alpine huts on alternating terraces in two columns by three rows, left and right in rear/middle/foreground. Place each hut clearly in its own clearing, grouped about x22% and 78%, y29%, 53%, 81%. No extra huts, no text, no map cards, no paths or network lines, no buttons or interface. Natural photographic landscape."
+  },
+  {
+    "name": "road",
+    "reference": "design-reference.png (road)",
+    "master": "road.png",
+    "prompt": "Landscape 2:1 tightly framed high oblique photograph of a SINGLE light grey paved alpine pass road zig-zagging across the frame with three very clear rounded hairpin bends on the rocky grassy mountain slope, almost aerial. Emulate reference layout of serpentine road occupying most of the view. Small alpine stream at far right and green forests, incredible detail. No vehicles, overlays, coloured lines, labels, controls, lettering or UI. Road wide enough for later vector tracing."
+  },
+  {
+    "name": "dps",
+    "reference": "design-reference.png (dps)",
+    "master": "dps.png",
+    "prompt": "Very wide landscape panorama 2.6:1. Faithfully reconstruct this clean alpine valley photograph without graphic overlays: serrated blue and silvery limestone summits, tawny green sunlit meadow, pine ridges; modest hut and field site on bottom left, another small field building lower-right, a thin communications mast at right ridge, open central valley floor. No icons, satellites, lines, glowing circles, phone, text, overlays or banners. Pale peaceful atmospheric receding mountains on the left. Photographic daylight, same viewpoint as reference."
+  },
+  {
+    "name": "bridge",
+    "reference": "design-reference.png (bridge)",
+    "master": "bridge.png",
+    "prompt": "2.7:1 wide alpine panorama with the exact composition of the reference photograph. Nearest inhabited timber mountain chalets front left and far right, smaller workrooms higher up behind. A beautiful curved stone arch viaduct across the gorge at lower center; morning sunlight catches warm windows and yellow pine meadows, limestone peaks behind. No text, letters, wires, icons, trails of light, AI graphics, question panel or overlays. Faithfully restore all landscape behind the pasted-on interface. Photographic realism."
+  },
+  {
+    "name": "terrace-mobile",
+    "reference": "design-reference.png (terrace)",
+    "master": "terrace-mobile.png",
+    "prompt": "Wide 2.5:1 photorealistic wood terrace table overlooking the same mountain pass and snow peaks. Robust warmly sunlit wood table spans the entire foreground (lower 40%), empty open tabletop in centre and to right for separately composited laptop and phone. Enamel hiking mug at far right at x90%, rucksack against stone edge at far right. Remove devices, UI, labels, typography, graphics and lines. Show the table from low viewpoint matching original perspective, horizontal front edge, open distant alpine horizon and pines. Ancient warm timber and beautiful woodgrain. No objects except mug and pack."
+  },
+  {
+    "name": "closing",
+    "reference": "design-reference.png (closing)",
+    "master": "closing.png",
+    "prompt": "Ultra-wide 3:1. Faithfully restore the closing photograph, same mountain pass and red-white marker at sunset, a natural single red fox curled up asleep RIGHT third on a broad warm rock. Front paws close to muzzle, a folded hiking map and small brass compass on the ledge next to it. Copper sunlight over blue alpine ridges, quiet shadowed left 48% for typography later. Keep fox head and tail and objects fully inside frame. Preserve original composition and golden light. No words, UI, buttons, labels, frames or graphic design."
+  },
+  {
+    "name": "terrace",
+    "reference": "design-reference.png (terrace)",
+    "master": "terrace.png",
+    "prompt": "Faithful photographic reconstruction of the hardware and table in this reference crop. Wide 2.5:1 alpine timber terrace at sunrise; a real open silver laptop prominently on the LEFT half and an upright real black smartphone in the RIGHT half stand ON THE TABLE, enamel mug and backpack far right. Keep both devices COMPLETELY in shot with foreground wood visible, including the realistic silver keyboard and trackpad, lid hinge and rounded bezel, lit from same direction, naturally grounded shadows. Screen of laptop large and fairly square to camera across x 13%-56%, phone across x68%-80%, both angled slightly as in reference and displaying uniform flat dark charcoal grey blank glass only, with clear edges for compositing. Leftmost 12% of picture a little clear for a paper fade. Real distant alpine valley and pines. Keep the actual device screens, keyboard, base, case and mug photographic. No writing, content, overlay, buttons, logos, letters or lines. Do not put any extra objects in front of the screen. Sharp photographic travel editorial detail."
+  }
+]

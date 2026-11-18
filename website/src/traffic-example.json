@@ -1,0 +1,8 @@
+{
+  "map": "Sunrise Pass, illustration 1", "direction": "downhill", "at": 18,
+  "segments": [
+    {"path":"M65 55C126 80 183 84 249 77S328 84 316 111S221 143 169 164Q134 179 154 195Q175 214 234 201","report":{"map":"Sunrise Pass, illustration 1","direction":"downhill","expires":20,"observations":8,"conflicting":false,"condition":"Slow traffic"}},
+    {"path":"M234 201C302 188 376 156 426 155S499 171 483 194S420 225 377 247Q332 265 345 291Q367 318 424 305","report":{"map":"Sunrise Pass, illustration 1","direction":"downhill","expires":16,"observations":7,"conflicting":false,"condition":"Slow traffic"}},
+    {"path":"M424 305C488 296 557 260 610 266S685 292 675 330Q670 360 729 393","report":null}
+  ]
+}

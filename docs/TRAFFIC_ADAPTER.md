@@ -33,7 +33,8 @@ python3 -B src/core_traffic.py \
 Replace the uppercase placeholders; they are not working production defaults.
 Use `--reuse-cache` only to reopen this operation's existing agent-owned cache;
 that retains the core's observed revision floor. This is not a global latest-version
-oracle. The consumer never enables participation, changes the host network or
+oracle. Pass `--cache-only` to read that cache without discovery or a network route.
+The receipt reports bytes and providers used by Core. A cache-only handoff requires both counts to be zero. The consumer never enables participation, changes the host network or
 uses direct HTTPS to work around an unavailable/denied core request.
 
 The output is a **local, private handoff**, not an independently signed portable
@@ -88,13 +89,15 @@ that mobile resource scheduling is implemented.
 python3 -B -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-The 31 current checks cover strict traffic parsing, dataset/time binding, empty
+The unit checks cover strict traffic parsing, dataset/time binding, empty
 clears, receipt correlation, hash readback, non-overwrite handoff and real child
 process timeout/output handling. Core receipt/file fixtures in adapter tests are
 explicitly synthetic. They do not prove a live peer transfer, native rendering,
 GPS aggregation, Android/iOS execution or traffic-aware navigation.
 
-Next: a real core-publication/peer-delivery trial, then the native manager input
+The disposable peer-trial driver in `tests/peer-traffic/` uses a tiny invented directed road graph.
+It checks separate cold, disconnected cache-only and post-expiry requests. The graph is a test
+resource for the adapter. Native application still requires the real manager input
 described in [INTEGRATION.md](INTEGRATION.md), including rendering **and** route-cache
 expiry. Consent-based local observations, privacy-preserving multi-contributor
 aggregation, abuse resistance, and independent source corroboration remain open.

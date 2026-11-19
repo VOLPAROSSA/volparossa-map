@@ -88,8 +88,10 @@ def command(args, output):
             "--min-revision", str(args.min_revision), "--cache", args.cache,
             "--local-output", str(output), "--quota-bytes", str(MAX_PAYLOAD),
             "--max-entries", "64"]
-    if args.reuse_cache:
+    if args.reuse_cache or args.cache_only:
         argv.append("--reuse-cache")
+    if args.cache_only:
+        argv.append("--cache-only")
     return argv
 
 
@@ -172,6 +174,11 @@ def receipt(raw, args, payload, output, now):
             and value.get("sha256") == hashlib.sha256(payload).hexdigest()
             and type(value.get("manifest_id")) is str and HEX32.fullmatch(value["manifest_id"])
             and natural(value.get("publication_expires_unix_seconds"), now + 1), "invalid_core_receipt")
+    require(natural(value.get("peer_bytes"))
+            and natural(value.get("providers_used"))
+            and (not args.cache_only or (value.get("cache_only") is True
+                 and value["peer_bytes"] == 0 and value["providers_used"] == 0)),
+            "invalid_core_receipt")
     return value
 
 
@@ -222,6 +229,7 @@ def fetch(args):
         # snapshot and clear both the renderer and routing cache at expiry.
         return {"operation": "traffic_snapshot_received", "roads": len(snapshot["roads"]),
                 "expires": snapshot["expires"], "revision": verified["revision"],
+                "peer_bytes": verified["peer_bytes"], "providers_used": verified["providers_used"],
                 "native_map_applied": False, "mobile_integration_proven": False,
                 "independent_observations_proven": False}
 
@@ -235,6 +243,8 @@ def main():
     parser.add_argument("--min-revision", required=True, type=int)
     parser.add_argument("--timeout", default=600, type=int)
     parser.add_argument("--reuse-cache", action="store_true")
+    parser.add_argument("--cache-only", action="store_true",
+                        help="read the verified existing cache without opening a route")
     args = parser.parse_args()
     try:
         print(json.dumps(fetch(args), separators=(",", ":")))

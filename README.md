@@ -10,14 +10,11 @@ keeping offline search and navigation while working toward shared map downloads,
 short-lived road-condition reports and private synchronization.
 
 The [VOLPAROSSA core](https://github.com/VOLPAROSSA/volparossa) supplies shared
-content delivery so this app can focus on maps and journeys. Help connect
-[validated traffic snapshots](docs/TRAFFIC_ADAPTER.md) to the actual map display,
-with stale or missing reports visibly unknown and observation sharing explicitly
-chosen by the user.
+content delivery so this app can focus on maps and journeys. The Linux desktop can display a publisher’s signed road conditions and use them when planning a drive. Users opt in with a private local Core handoff. [Traffic adapter](docs/TRAFFIC_ADAPTER.md)
 
 The Linux traffic adapter received a signed 325-byte aggregate for a synthetic road graph from one provider in the twelve-node Core trial. After the route disconnected, the adapter reopened the same private handoff from cache with zero peer bytes. One second after signed expiry, Core refused the next handoff. [Peer trial](https://github.com/VOLPAROSSA/volparossa/actions/runs/44438057954) · [Run the adapter](docs/TRAFFIC_ADAPTER.md)
 
-The published Organic Maps Android app calculated two pedestrian routes on the Monaco map after separate cold starts with airplane mode enabled and only loopback available to the emulator. The native route planner reported 390 m in 6 minutes and 490 m in 7 minutes. Applying verified traffic to the native display and routing costs remains open. [Android trial](https://github.com/VOLPAROSSA/volparossa-map/actions/runs/44444481182) · [Native integration](docs/INTEGRATION.md)
+The published Organic Maps Android app calculated two pedestrian routes on the Monaco map after separate cold starts with airplane mode enabled and only loopback available to the emulator. The native route planner reported 390 m in 6 minutes and 490 m in 7 minutes. The separate patched Linux desktop applied 719 synthetic observations to the actual Monaco graph. Its car route changed from 1.08 km to 3.75 km and returned to the same 1.08 km route at expiry. [Desktop traffic trial](docs/NATIVE_TRAFFIC.md) [Android trial](https://github.com/VOLPAROSSA/volparossa-map/actions/runs/44444481182) · [Native integration](docs/INTEGRATION.md)
 
 ## What the network can add
 

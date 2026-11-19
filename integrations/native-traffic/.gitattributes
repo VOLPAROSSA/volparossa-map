@@ -1,0 +1,2 @@
+# Unified diff context lines retain their prefix even when the source line is blank.
+organicmaps.patch whitespace=-blank-at-eol

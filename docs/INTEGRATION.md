@@ -24,7 +24,7 @@ resistance. The observation protocol, privacy mechanism and resistance to fake
 contributors remain required work. Unknown, expired or conflicting evidence must
 not be displayed as known free-flow traffic.
 
-## Next native traffic seam
+## Native advisory traffic
 
 Upstream's
 [`TrafficInfo::RoadSegmentId`](https://github.com/organicmaps/organicmaps/blob/b20d1417eef1e3c63a447ac8658db4307a066024/libs/traffic/traffic_info.hpp)
@@ -43,35 +43,7 @@ percent; these are not km/h values.
 `TempBlock` currently adds a large routing cost, not a legally authoritative or
 absolute road closure. Do not let one uncorroborated report become a closure.
 
-Add a deliberately named production entrypoint such as
-`TrafficManager::ApplyVerifiedAggregate` **in a future native patch**. It should:
-
-1. Accept only bounded, already authenticated aggregate data bound to the loaded
-   map identity, dataset version, full-content digest and a short expiry. Unknown
-   map versions and invalid geometry fail before publishing a coloring.
-2. Construct a real `TrafficInfo` through a new validated production factory;
-   do not reuse `BuildForTesting` or fabricate `MwmId`/road IDs. Keep peer transport
-   and core scheduling outside Organic Maps' routing engine.
-3. Update manager cache/state and dispatch the same accepted coloring to Drape
-   and the routing observer. The current
-   [`OnTrafficDataResponse`](https://github.com/organicmaps/organicmaps/blob/b20d1417eef1e3c63a447ac8658db4307a066024/libs/map/traffic_manager.cpp)
-   is private, requires an existing map cache entry and skips empty colorings;
-   simply calling it is not a complete new input path.
-4. Explicitly remove both render and routing state on empty replacement, expiry,
-   map replacement, disable and revocation. Upstream's HTTP poll/outdated timers
-   do not enforce a core-signed aggregate's expiry. Bound/coalesce updates so
-   repeated arrivals do not continually restart route building.
-5. Prove actual native route geometry/ETA changes and actual layer rendering
-   using synthetic lawful observations and a rights-cleared map. Existing
-   [`applying_traffic_test.cpp`](https://github.com/organicmaps/organicmaps/blob/b20d1417eef1e3c63a447ac8658db4307a066024/libs/routing/routing_tests/applying_traffic_test.cpp)
-   is useful for route-weight test patterns; mocked coloring alone is not
-   end-to-end peer delivery or real-world traffic accuracy evidence.
-
-A first real vertical is: signed aggregate delivered through the existing core
-→ bounded application validation → native coloring on an exact loaded map →
-route change → expiry restoring unknown/base routing. Public traffic collection,
-multi-contributor aggregation, dispute handling and real-world accuracy are
-additional work, not implied by a successful consumer test.
+The Linux desktop patch adds an explicit, private input to the native traffic manager. It hashes the registered map reader, checks the geometry of every directed segment and sends fresh traffic to Drape and the native vehicle router. The renderer and routing cache clear at expiry, withdrawal and map replacement. The original offline router remains available after the change. Signed-cache desktop measurements include both framebuffers and actual changes in route geometry and ETA. Community observation collection and source corroboration remain open. [Build, run and inspect the measurements](NATIVE_TRAFFIC.md)
 
 ## Map downloads and updates
 

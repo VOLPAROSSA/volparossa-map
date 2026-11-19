@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-"""Exercise only the released app and its normal URL/UI on a disconnected test emulator."""
+"""Exercise the native app through its normal URL/UI on a disconnected test emulator."""
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -12,9 +13,15 @@ import sys
 import time
 import xml.etree.ElementTree as ET
 
-ADB, INPUTS = sys.argv[1], Path(sys.argv[2])
+ADB, INPUTS, mode = sys.argv[1], Path(sys.argv[2]), sys.argv[3]
+assert mode in {"release", "web-debug"}
 PINS = json.loads(Path(__file__).with_name("inputs.json").read_bytes())
-PACKAGE = "app.organicmaps.web"
+built_digest = INPUTS / "web-debug-apk.sha256"
+expected_digest = built_digest.read_text().strip() if mode == "web-debug" else PINS["apk_sha256"]
+with (INPUTS / "OrganicMaps.apk").open("rb") as stream:
+    apk_digest = hashlib.file_digest(stream, "sha256").hexdigest()
+assert apk_digest == expected_digest
+PACKAGE = "app.organicmaps.web.debug" if mode == "web-debug" else "app.organicmaps.web"
 COMPONENT = PACKAGE + "/app.organicmaps.SplashActivity"
 # Two public street points, no device location or personal route.
 START = "43.73731,7.42668"
@@ -68,7 +75,7 @@ def open_route(start, end):
     return uri
 
 
-def route(start, end):
+def route(start, end, previous_summary):
     assert_offline()
     device("logcat", "-b", "crash", "-c")
     open_route(start, end)
@@ -89,7 +96,8 @@ def route(start, end):
                 controls.add(rid)
                 if rid == "time" and "•" in label and re.search(r"\d", label):
                     duration, distance = (part.strip() for part in label.split("•", 1))
-                    if re.search(r"\d", duration) and re.fullmatch(r"[\d.,\s]+(?:km|m|mi|ft)", distance):
+                    if (re.search(r"\d", duration) and re.fullmatch(r"[\d.,\s]+(?:km|m|mi|ft)", distance)
+                            and len(label) <= 80):
                         summaries.add(label)
             if not node.get("enabled") == "true":
                 continue
@@ -101,15 +109,19 @@ def route(start, end):
             if pkg == PACKAGE and label.casefold() in {"accept", "continue", "next", "done", "got it", "ok", "close", "understood"}:
                 tap(node)
                 break
-        if summaries:
-            assert_offline()
-            return sorted(summaries)[0]
+        for summary in sorted(summaries):
+            # The activity can draw a provisional or restored previous route
+            # before its asynchronous native calculation reaches the new destination.
+            if summary != previous_summary and re.search(r"[1-9]", summary.split("•", 1)[1]):
+                assert_offline()
+                return summary
         if not retried and time.monotonic() > deadline - 55:
             open_route(start, end)
             retried = True
         time.sleep(1)
     print("Observed app controls", sorted(controls)[:75], file=sys.stderr)
     print("Foreground packages", sorted({node["package"] for node in nodes}), file=sys.stderr)
+    print("Observed native route summaries", sorted(summaries)[:8], file=sys.stderr)
     for node in nodes:
         if node["package"] == "com.android.permissioncontroller" and node["text"]:
             print("Android permission dialog", node["resource-id"], node["text"][:120], file=sys.stderr)
@@ -193,13 +205,15 @@ for permission in ("ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "POST_NOTIF
 summaries = []
 for start, end in ROUTES:
     device("am", "force-stop", PACKAGE)
-    summaries.append(route(start, end))
+    summaries.append(route(start, end, summaries[-1] if summaries else None))
 assert len(set(summaries)) == 2 and all(re.search(r"[1-9]", s.split("•")[1]) for s in summaries)
 assert_offline()
 device("am", "force-stop", PACKAGE)
 assert not device("pidof", PACKAGE, check=False)
-result = dict(map_commit=os.environ["GITHUB_SHA"], organic_maps_source=PINS["source"], apk_sha256=PINS["apk_sha256"],
+result = dict(map_commit=os.environ["GITHUB_SHA"], organic_maps_source=PINS["source"], apk_sha256=apk_digest,
               maps_version=PINS["data_version"], monaco_sha256=PINS["maps"]["Monaco"][2], android_api=device("getprop", "ro.build.version.sdk"),
               native_pedestrian_route_summaries=summaries, cold_app_launches=2, host_namespace_interfaces=["lo"],
               guest_airplane_mode=True, app_stopped=True)
+if mode == "web-debug":
+    result.update(android_source_build="WebDebug", application_id=PACKAGE, built_abi="x86_64")
 (INPUTS / "receipt.json").write_text(json.dumps(result, separators=(",", ":")) + "\n")

@@ -5,6 +5,8 @@ trap 'echo "Android preparation stopped at line $LINENO" >&2' ERR
 umask 077
 [[ "$GITHUB_ACTIONS:$RUNNER_ENVIRONMENT" = true:github-hosted ]]
 [[ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]]
+mode=${1:-release}
+[[ $# -le 1 && ( $mode = release || $mode = web-debug ) ]]
 trial=$ROUTE_TRIAL
 repo=$GITHUB_WORKSPACE
 sdk=${ANDROID_HOME:?}
@@ -34,5 +36,5 @@ sudo -n /usr/bin/unshare --net -- /bin/bash -ceu '
     exec /usr/bin/setpriv --reuid "$1" --regid "$2" --clear-groups --inh-caps=-all --ambient-caps=-all \
         --bounding-set=-all --no-new-privs --reset-env -- /usr/bin/env HOME="$3/home" ANDROID_HOME="$3/sdk" \
         ANDROID_SDK_ROOT="$3/sdk" ANDROID_USER_HOME="$3/android-home" ANDROID_AVD_HOME="$3/avds" TMPDIR="$3/tmp" \
-        GITHUB_SHA="$4" PATH=/usr/bin:/bin /bin/bash "$5/tests/offline-route/run-guest.sh" "$3" "$5"
-' offline-map "$runner_uid" "$kvm_gid" "$trial" "$GITHUB_SHA" "$repo"
+        GITHUB_SHA="$4" PATH=/usr/bin:/bin /bin/bash "$5/tests/offline-route/run-guest.sh" "$3" "$5" "$6"
+' offline-map "$runner_uid" "$kvm_gid" "$trial" "$GITHUB_SHA" "$repo" "$mode"

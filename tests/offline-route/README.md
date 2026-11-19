@@ -5,3 +5,5 @@ This opt-in hosted trial runs the published Organic Maps Android app, in its ori
 Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) and [Organic Maps](https://organicmaps.app). The runner uses the original release under its [binary data license](https://github.com/organicmaps/organicmaps/blob/b20d1417eef1e3c63a447ac8658db4307a066024/DATA_LICENSE.txt). The artifact contains only measurements and the public input digests.
 
 The traffic adapter and its signed peer trial run separately. This Android proof measures base-map routing without a traffic overlay.
+
+The **Organic Maps source toolchains** workflow also builds the pinned upstream commit. Its Qt job registers the three original maps in a fresh profile, opens the normal desktop UI under Xvfb with software OpenGL, and checks two different native map frames before the application exits. Its Android job compiles the native x86-64 WebDebug APK and uses the same two-route emulator trial. Receipts identify the runtime, exact project and upstream revisions, and executable or APK digest. The uploaded artifacts contain measurements only.

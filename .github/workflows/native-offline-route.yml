@@ -1,0 +1,37 @@
+name: Organic Maps offline pedestrian routing
+on:
+  workflow_dispatch:
+  push:
+    branches: [development/map-organic-offline-route-20261119]
+    paths: [.github/workflows/native-offline-route.yml, tests/offline-route/**]
+
+permissions:
+  contents: read
+concurrency:
+  group: map-offline-route-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  offline-route:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Acquire the exact official Android release and its public map files
+        run: |
+          set -euo pipefail
+          umask 077
+          trial=$(mktemp -d "$RUNNER_TEMP/map-offline.XXXXXX")
+          echo "ROUTE_TRIAL=$trial" >> "$GITHUB_ENV"
+          python3 -B tests/offline-route/inputs.py "$trial"
+      - name: Build two normal pedestrian routes without external network interfaces
+        run: bash tests/offline-route/emulator.sh
+      - name: Preserve only the public route evidence
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: organic-maps-offline-${{ github.sha }}
+          path: ${{ env.ROUTE_TRIAL }}/receipt.json
+          if-no-files-found: error
+          retention-days: 30

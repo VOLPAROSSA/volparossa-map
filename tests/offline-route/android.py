@@ -75,7 +75,7 @@ def open_route(start, end):
     return uri
 
 
-def route(start, end):
+def route(start, end, previous_summary):
     assert_offline()
     device("logcat", "-b", "crash", "-c")
     open_route(start, end)
@@ -96,7 +96,8 @@ def route(start, end):
                 controls.add(rid)
                 if rid == "time" and "•" in label and re.search(r"\d", label):
                     duration, distance = (part.strip() for part in label.split("•", 1))
-                    if re.search(r"\d", duration) and re.fullmatch(r"[\d.,\s]+(?:km|m|mi|ft)", distance):
+                    if (re.search(r"\d", duration) and re.fullmatch(r"[\d.,\s]+(?:km|m|mi|ft)", distance)
+                            and len(label) <= 80):
                         summaries.add(label)
             if not node.get("enabled") == "true":
                 continue
@@ -108,15 +109,19 @@ def route(start, end):
             if pkg == PACKAGE and label.casefold() in {"accept", "continue", "next", "done", "got it", "ok", "close", "understood"}:
                 tap(node)
                 break
-        if summaries:
-            assert_offline()
-            return sorted(summaries)[0]
+        for summary in sorted(summaries):
+            # The activity can draw a provisional or restored previous route
+            # before its asynchronous native calculation reaches the new destination.
+            if summary != previous_summary and re.search(r"[1-9]", summary.split("•", 1)[1]):
+                assert_offline()
+                return summary
         if not retried and time.monotonic() > deadline - 55:
             open_route(start, end)
             retried = True
         time.sleep(1)
     print("Observed app controls", sorted(controls)[:75], file=sys.stderr)
     print("Foreground packages", sorted({node["package"] for node in nodes}), file=sys.stderr)
+    print("Observed native route summaries", sorted(summaries)[:8], file=sys.stderr)
     for node in nodes:
         if node["package"] == "com.android.permissioncontroller" and node["text"]:
             print("Android permission dialog", node["resource-id"], node["text"][:120], file=sys.stderr)
@@ -200,7 +205,7 @@ for permission in ("ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "POST_NOTIF
 summaries = []
 for start, end in ROUTES:
     device("am", "force-stop", PACKAGE)
-    summaries.append(route(start, end))
+    summaries.append(route(start, end, summaries[-1] if summaries else None))
 assert len(set(summaries)) == 2 and all(re.search(r"[1-9]", s.split("•")[1]) for s in summaries)
 assert_offline()
 device("am", "force-stop", PACKAGE)

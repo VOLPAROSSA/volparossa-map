@@ -1,6 +1,7 @@
 #!/bin/bash
 # SPDX-License-Identifier: GPL-3.0-only
-set -euo pipefail
+set -Eeuo pipefail
+trap 'echo "Android preparation stopped at line $LINENO" >&2' ERR
 umask 077
 [[ "$GITHUB_ACTIONS:$RUNNER_ENVIRONMENT" = true:github-hosted ]]
 [[ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]]
@@ -9,20 +10,18 @@ repo=$GITHUB_WORKSPACE
 sdk=${ANDROID_HOME:?}
 runner_uid=$(id -u)
 [[ $runner_uid -ne 0 && -c /dev/kvm ]]
-kvm_gid=$(stat -c %g /dev/kvm)
+kvm_gid=$(stat -Lc %g /dev/kvm)
 [[ "$kvm_gid" != 0 && $(getent group "$kvm_gid" | cut -d: -f1) = kvm ]]
 image="$trial/sdk/system-images/android-35/default/x86_64"
 install -d -m 0700 "$trial/sdk" "$trial/home" "$trial/android-home" "$trial/avds" "$trial/tmp"
 cp -r -- "$sdk/licenses" "$trial/sdk/licenses"
 manager="$sdk/cmdline-tools/latest/bin"
-[[ -x "$manager/sdkmanager" && -x "$manager/avdmanager" && -x "$sdk/platform-tools/adb" && -x "$sdk/emulator/emulator" ]]
+[[ -x "$manager/sdkmanager" && -x "$manager/avdmanager" ]]
 export ANDROID_USER_HOME="$trial/android-home" ANDROID_AVD_HOME="$trial/avds"
-"$manager/sdkmanager" --sdk_root="$trial/sdk" "system-images;android-35;default;x86_64"
+"$manager/sdkmanager" --sdk_root="$trial/sdk" platform-tools emulator "system-images;android-35;default;x86_64"
 test -s "$image/system.img"
 # The distribution's avdmanager locates packages relative to its SDK. Create
 # a temporary SDK that shares the installed tools and owns just this system image.
-ln -s "$sdk/platform-tools" "$trial/sdk/platform-tools"
-ln -s "$sdk/emulator" "$trial/sdk/emulator"
 install -d -m 0700 "$trial/sdk/cmdline-tools"
 cp -aL -- "$sdk/cmdline-tools/latest" "$trial/sdk/cmdline-tools/latest"
 export ANDROID_HOME="$trial/sdk" ANDROID_SDK_ROOT="$trial/sdk"

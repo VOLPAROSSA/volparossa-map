@@ -10,7 +10,7 @@ on:
       - tests/offline-route/inputs.py
       - tests/offline-route/android.py
       - tests/offline-route/emulator.sh
-      - tests/offline-route/run-guest.sh
+      - tests/offline-route/run_guest.py
 permissions:
   contents: read
 

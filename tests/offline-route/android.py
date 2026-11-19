@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-"""Exercise only the released app and its normal URL/UI on a disconnected test emulator."""
+"""Exercise the native app through its normal URL/UI on a disconnected test emulator."""
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -12,9 +13,15 @@ import sys
 import time
 import xml.etree.ElementTree as ET
 
-ADB, INPUTS = sys.argv[1], Path(sys.argv[2])
+ADB, INPUTS, mode = sys.argv[1], Path(sys.argv[2]), sys.argv[3]
+assert mode in {"release", "web-debug"}
 PINS = json.loads(Path(__file__).with_name("inputs.json").read_bytes())
-PACKAGE = "app.organicmaps.web"
+built_digest = INPUTS / "web-debug-apk.sha256"
+expected_digest = built_digest.read_text().strip() if mode == "web-debug" else PINS["apk_sha256"]
+with (INPUTS / "OrganicMaps.apk").open("rb") as stream:
+    apk_digest = hashlib.file_digest(stream, "sha256").hexdigest()
+assert apk_digest == expected_digest
+PACKAGE = "app.organicmaps.web.debug" if mode == "web-debug" else "app.organicmaps.web"
 COMPONENT = PACKAGE + "/app.organicmaps.SplashActivity"
 # Two public street points, no device location or personal route.
 START = "43.73731,7.42668"
@@ -198,8 +205,10 @@ assert len(set(summaries)) == 2 and all(re.search(r"[1-9]", s.split("•")[1]) f
 assert_offline()
 device("am", "force-stop", PACKAGE)
 assert not device("pidof", PACKAGE, check=False)
-result = dict(map_commit=os.environ["GITHUB_SHA"], organic_maps_source=PINS["source"], apk_sha256=PINS["apk_sha256"],
+result = dict(map_commit=os.environ["GITHUB_SHA"], organic_maps_source=PINS["source"], apk_sha256=apk_digest,
               maps_version=PINS["data_version"], monaco_sha256=PINS["maps"]["Monaco"][2], android_api=device("getprop", "ro.build.version.sdk"),
               native_pedestrian_route_summaries=summaries, cold_app_launches=2, host_namespace_interfaces=["lo"],
               guest_airplane_mode=True, app_stopped=True)
+if mode == "web-debug":
+    result.update(android_source_build="WebDebug", application_id=PACKAGE, built_abi="x86_64")
 (INPUTS / "receipt.json").write_text(json.dumps(result, separators=(",", ":")) + "\n")

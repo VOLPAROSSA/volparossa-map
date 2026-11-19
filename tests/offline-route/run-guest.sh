@@ -4,6 +4,7 @@ set -euo pipefail
 umask 077
 trial=$1
 root=$2
+mode=$3
 [[ $(id -u) != 0 && -c /dev/kvm ]]
 [[ "$(ip -j link | python3 -c 'import sys,json;print([v["ifname"] for v in json.load(sys.stdin)])')" = "['lo']" ]]
 emu="$trial/sdk/emulator/emulator"
@@ -20,4 +21,4 @@ finish() {
     "$adb" kill-server >/dev/null 2>&1 || true
 }
 trap finish EXIT
-timeout --kill-after=10s 720s python3 -B "$root/tests/offline-route/android.py" "$adb" "$trial"
+timeout --kill-after=10s 720s python3 -B "$root/tests/offline-route/android.py" "$adb" "$trial" "$mode"

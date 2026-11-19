@@ -36,15 +36,19 @@ jobs:
           ref: ${{ env.CORE_SOURCE }}
           path: build/core
           persist-credentials: false
+      - id: ubuntu
+        uses: VOLPAROSSA/.github/actions/ubuntu-archive@e3f98bbc538f5df580b78c8a0d8bd932dfe3e381
       - name: Provision the disposable build and guest tools
+        env:
+          UBUNTU_ARCHIVE_CONFIG: ${{ steps.ubuntu.outputs.config }}
         run: |
           set -euo pipefail
           test "$RUNNER_ENVIRONMENT" = github-hosted
           test -c /dev/kvm
           test "$(git -C build/core rev-parse HEAD)" = "$CORE_SOURCE"
           python3 -B build/core/scripts/provision-rust189.py runner
-          sudo -n apt-get update -o APT::Update::Error-Mode=any
-          sudo -n apt-get install -y --no-install-recommends ninja-build qt6-base-dev qt6-positioning-dev libqt6svg6-dev \
+          sudo -n apt-get -c "$UBUNTU_ARCHIVE_CONFIG" update
+          sudo -n apt-get -c "$UBUNTU_ARCHIVE_CONFIG" install -y --no-install-recommends ninja-build qt6-base-dev qt6-positioning-dev libqt6svg6-dev \
             libgl1-mesa-dev libglvnd-dev libharfbuzz-dev libxcursor-dev libxi-dev libxinerama-dev libxrandr-dev \
             xvfb xauth mesa-utils libgl1-mesa-dri xdotool python3-pil qemu-system-x86 qemu-utils cloud-image-utils genisoimage
       - name: Build the native desktop and fixture against the pinned upstream

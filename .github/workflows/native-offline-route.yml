@@ -1,9 +1,15 @@
 name: Organic Maps offline pedestrian routing
 on:
   workflow_dispatch:
-  push:
-    branches: [development/map-organic-offline-route-20261119]
-    paths: [.github/workflows/native-offline-route.yml, tests/offline-route/**]
+  pull_request:
+    paths:
+      - .github/workflows/native-offline-route.yml
+      - upstream.lock.json
+      - tests/offline-route/inputs.json
+      - tests/offline-route/inputs.py
+      - tests/offline-route/android.py
+      - tests/offline-route/emulator.sh
+      - tests/offline-route/run-guest.sh
 
 permissions:
   contents: read

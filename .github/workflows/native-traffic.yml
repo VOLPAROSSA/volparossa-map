@@ -6,6 +6,11 @@ on:
       - .github/workflows/native-traffic.yml
       - integrations/native-traffic/**
       - tests/native-traffic/**
+      - upstream.lock.json
+      - tests/native-toolchains/checkout.sh
+      - tests/offline-route/inputs.json
+      - tests/offline-route/inputs.py
+      - tests/native-toolchains/qt_session.py
       - tests/native-toolchains/traffic_frames.py
       - src/core_traffic.py
       - src/traffic_snapshot.py

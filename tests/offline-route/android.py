@@ -82,7 +82,9 @@ def route(start, end):
                         summaries.add(label)
             if not node.get("enabled") == "true":
                 continue
-            if pkg == "com.android.permissioncontroller" and rid == "permission_deny_button":
+            if pkg == "com.android.permissioncontroller" and (
+                    rid in {"permission_deny_button", "permission_deny_and_dont_ask_again_button"}
+                    or label.replace("’", "'").casefold() in {"don't allow", "deny"}):
                 tap(node)
                 break
             if pkg == PACKAGE and label.casefold() in {"accept", "continue", "next", "done", "got it", "ok", "close", "understood"}:
@@ -97,6 +99,9 @@ def route(start, end):
         time.sleep(1)
     print("Observed app controls", sorted(controls)[:75], file=sys.stderr)
     print("Foreground packages", sorted({node["package"] for node in nodes}), file=sys.stderr)
+    for node in nodes:
+        if node["package"] == "com.android.permissioncontroller" and node["text"]:
+            print("Android permission dialog", node["resource-id"], node["text"][:120], file=sys.stderr)
     exits = device("dumpsys", "activity", "exit-info", PACKAGE)
     for line in exits.splitlines():
         if "reason=" in line or "description=" in line:
@@ -169,6 +174,14 @@ device("restorecon", "-RF", base)
 adb("unroot")
 adb("wait-for-device")
 assert device("id", "-u") == "2000"
+# Both endpoints are explicit. Exercise the app with the ordinary Android
+# permission state a user gets by declining access to location and notifications.
+for permission in ("ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "POST_NOTIFICATIONS"):
+    full_name = "android.permission." + permission
+    device("pm", "revoke", PACKAGE, full_name)
+    device("pm", "set-permission-flags", PACKAGE, full_name, "user-set", "user-fixed")
+    state = device("dumpsys", "package", PACKAGE)
+    assert re.search(re.escape(full_name) + r": granted=false, flags=\[[^\]]*USER_FIXED", state)
 summaries = []
 for start, end in ROUTES:
     device("am", "force-stop", PACKAGE)

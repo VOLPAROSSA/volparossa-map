@@ -1,0 +1,50 @@
+{
+  "upstream": "b20d1417eef1e3c63a447ac8658db4307a066024",
+  "desktop_sha256": "efbcc681bd2678ca3daa95537a4757404e77907e346beeaa65c327fb119db2f5",
+  "qt": "6.8.2",
+  "renderer": "llvmpipe (LLVM 19.1.7, 256 bits)",
+  "network_interfaces": [
+    "lo"
+  ],
+  "map_version": 260928,
+  "map_sha256": {
+    "World": "8e699618f4727d6217348d5eb976f92687797dfe4abc40278cfa43b3600199ef",
+    "WorldCoasts": "5368b39c6fa34f4fdf3ade6b7ee6ececeb7ded6e5b691e90ab4ef4214ab3221e",
+    "Monaco": "5ae7d547e0940862cea624c6c8248c6abbcf125f817411cf55598c4ecad0fada"
+  },
+  "application_exit": 0,
+  "queries": [
+    {
+      "query": "Oceanographic",
+      "first_result": "Oceanographic Museum of Monaco",
+      "feature_category": "tourism-museum",
+      "result_address": "Monaco, Monaco",
+      "clicked_result": true,
+      "place_page_seen": true,
+      "place_page_terms": [
+        "place page",
+        "oceanographic",
+        "tourism-museum",
+        "wikipedia"
+      ],
+      "results_image_sha256": "cc0e5083a89b1ae435f59e5d81d75a36f03b4f779305a96399493b10b2a63cc0",
+      "place_page_image_sha256": "6840507f2079ddf95b4fdaed7a2cbf3fc800e41711600929bfe6169197039eac"
+    },
+    {
+      "query": "Monte Carlo Casino",
+      "first_result": "Monte-Carlo Casino and Opera House",
+      "feature_category": "tourism-attraction",
+      "result_address": "Monaco, Monaco",
+      "clicked_result": true,
+      "place_page_seen": true,
+      "place_page_terms": [
+        "place page",
+        "and opera house",
+        "amenity-casino",
+        "wikipedia"
+      ],
+      "results_image_sha256": "57495155471f2a851769eb1122d263f9584cc1855a021adb2aac1fd1ff976483",
+      "place_page_image_sha256": "bef5903ed070ab404b78d5cf01c5d284a47005194020352b2506f3f910e2358c"
+    }
+  ]
+}

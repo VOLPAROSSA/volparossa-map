@@ -14,6 +14,8 @@ content delivery so this app can focus on maps and journeys. The Linux desktop c
 
 The Linux traffic adapter received a signed 325-byte aggregate for a synthetic road graph from one provider in the twelve-node Core trial. After the route disconnected, the adapter reopened the same private handoff from cache with zero peer bytes. One second after signed expiry, Core refused the next handoff. [Peer trial](https://github.com/VOLPAROSSA/volparossa/actions/runs/44438057954) · [Run the adapter](docs/TRAFFIC_ADAPTER.md)
 
+On the unmodified Linux desktop, the regular **Offline Search** found the Oceanographic Museum of Monaco and the Monte-Carlo Casino and Opera House from the downloaded Monaco map. Selecting each first result opened its place page with the museum or casino feature category. The process had only loopback available. [Repeat the two searches and inspect the result](docs/evidence/offline-place-search-20261119/README.md)
+
 The published Organic Maps Android app calculated two pedestrian routes on the Monaco map after separate cold starts with airplane mode enabled and only loopback available to the emulator. The native route planner reported 390 m in 6 minutes and 490 m in 7 minutes. The separate patched Linux desktop applied 719 synthetic observations to the actual Monaco graph. Its car route changed from 1.08 km to 3.75 km and returned to the same 1.08 km route at expiry. [Desktop traffic trial](docs/NATIVE_TRAFFIC.md) [Android trial](https://github.com/VOLPAROSSA/volparossa-map/actions/runs/44444481182) · [Native integration](docs/INTEGRATION.md)
 
 ## What the network can add

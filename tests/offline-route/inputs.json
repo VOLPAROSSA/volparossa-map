@@ -1,0 +1,11 @@
+{
+  "release": "2026.09.29-32-android",
+  "source": "b20d1417eef1e3c63a447ac8658db4307a066024",
+  "apk_sha256": "d7dbdfc3cbfdbcce6d437f11147f2cd15384c03052d2b4594fd8c1c7777dd497",
+  "data_version": 260928,
+  "maps": {
+    "World": [64801701, "D+Wwx56zIW3C", "8e699618f4727d6217348d5eb976f92687797dfe4abc40278cfa43b3600199ef"],
+    "WorldCoasts": [8351612, "oBZLRAVLH0W1", "5368b39c6fa34f4fdf3ade6b7ee6ececeb7ded6e5b691e90ab4ef4214ab3221e"],
+    "Monaco": [1102920, "j/PQQn4TOhHh", "5ae7d547e0940862cea624c6c8248c6abbcf125f817411cf55598c4ecad0fada"]
+  }
+}

@@ -15,14 +15,9 @@ content delivery so this app can focus on maps and journeys. Help connect
 with stale or missing reports visibly unknown and observation sharing explicitly
 chosen by the user.
 
-> Integration in development. This repository is not yet a modified Android/iOS application
-> with working decentralized traffic. Component checks are not mobile or live-network proof.
+The Linux traffic adapter received a signed 325-byte aggregate for a synthetic road graph from one provider in the twelve-node Core trial. After the route disconnected, the adapter reopened the same private handoff from cache with zero peer bytes. One second after signed expiry, Core refused the next handoff. [Peer trial](https://github.com/VOLPAROSSA/volparossa/actions/runs/44438057954) · [Run the adapter](docs/TRAFFIC_ADAPTER.md)
 
-The first executable component now receives a **signed, short-lived traffic snapshot through
-the core's existing content interface**. It checks the selected publisher, exact map binding,
-revision floor, file hash and expiry before handing data to the application. Its focused
-tests cover validation and the process contract; an actual peer-to-map proof is still open.
-[Run the development traffic adapter →](docs/TRAFFIC_ADAPTER.md)
+The published Organic Maps Android app calculated two pedestrian routes on the Monaco map after separate cold starts with airplane mode enabled and only loopback available to the emulator. The native route planner reported 390 m in 6 minutes and 490 m in 7 minutes. Applying verified traffic to the native display and routing costs remains open. [Android trial](https://github.com/VOLPAROSSA/volparossa-map/actions/runs/44444481182) · [Native integration](docs/INTEGRATION.md)
 
 ## What the network can add
 

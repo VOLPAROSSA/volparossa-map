@@ -28,7 +28,7 @@ class TrafficBridgeTests(unittest.TestCase):
             publisher_key="a" * 64, name="traffic/synthetic/1", min_revision=1,
             cache=str(self.root / "agent-cache"), output=str(self.root / "accepted.json"),
             region="Synthetic", map_version=260929, map_sha256="b" * 64,
-            timeout=30, reuse_cache=False)
+            timeout=30, reuse_cache=False, cache_only=False)
         now = int(time.time())
         self.snapshot = {"format": "volparossa-road-traffic-v1", "region": "Synthetic",
                          "map_version": 260929, "map_sha256": "b" * 64,
@@ -52,6 +52,7 @@ class TrafficBridgeTests(unittest.TestCase):
                  "name": self.args.name, "revision": 3, "local_delivery": True, "output_mode": "0600",
                  "ownership_changed": False, "origin_authenticated": False, "globally_latest": False,
                  "local_output": str(output), "bytes": len(payload),
+                 "peer_bytes": len(payload), "providers_used": 1, "cache_only": False,
                  "sha256": hashlib.sha256(payload).hexdigest(), "manifest_id": "c" * 64,
                  "publication_expires_unix_seconds": self.snapshot["expires"]}
         return json.dumps(value).encode()
@@ -67,6 +68,22 @@ class TrafficBridgeTests(unittest.TestCase):
         self.assertEqual(self.argv[:5], [self.args.core, "--control-socket", self.args.control_socket,
                                       "content", "fetch-name"])
         self.assertFalse(any(self.root.glob(".volparossa-traffic-*")))
+
+    def test_cache_only_requires_existing_cache_and_zero_peer_delivery(self):
+        self.args.cache_only = True
+        def cached(argv, timeout):
+            value = json.loads(self.fake_core(argv, timeout))
+            value.update(peer_bytes=0, providers_used=0, cache_only=True)
+            return json.dumps(value).encode()
+        with patch.object(bridge, "run_core", side_effect=cached):
+            report = bridge.fetch(self.args)
+        self.assertEqual(self.argv[-2:], ["--reuse-cache", "--cache-only"])
+        self.assertEqual((report["peer_bytes"], report["providers_used"]), (0, 0))
+        Path(self.args.output).unlink()
+        with patch.object(bridge, "run_core", side_effect=self.fake_core), self.assertRaisesRegex(
+                bridge.TrafficFetchError, "invalid_core_receipt"):
+            bridge.fetch(self.args)
+        self.assertFalse(Path(self.args.output).exists())
 
     def test_receipt_cannot_relabel_origin_or_publisher(self):
         for key, value in (("origin_authenticated", True), ("publisher_key", "d" * 64),

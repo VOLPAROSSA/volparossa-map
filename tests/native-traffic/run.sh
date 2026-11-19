@@ -31,6 +31,8 @@ mkdir "$vm/medium"
 python3 -B "$top/guest_stage.py" stage --core "$core" --binaries "$binaries" --mwm "$maps/Monaco.mwm" \
   --roads "$vm/roads.json" --output "$vm/medium/trial.tar"
 genisoimage -quiet -R -V MAPDATA -o "$vm/data.iso" "$vm/medium"
+rm -- "$vm/medium/trial.tar"
+rmdir "$vm/medium"
 echo 'instance-id: map-native-traffic' > "$vm/meta"
 cloud-localds "$vm/seed.img" "$top/guest.sh" "$vm/meta"
 qemu-img create -q -f qcow2 -F qcow2 -b "$disk" "$vm/overlay.qcow2" 8G

@@ -16,8 +16,6 @@ concurrency:
   cancel-in-progress: false
 env:
   CORE_SOURCE: 7fe73bf18d8f8f0d5b1096d4fd6485c3315a6e69
-  CARGO_PROFILE_DEV_DEBUG: '0'
-  CARGO_INCREMENTAL: '0'
   CARGO_BUILD_JOBS: '2'
 jobs:
   desktop:
@@ -63,6 +61,9 @@ jobs:
           install -D -m 0644 ../../tests/native-traffic/remember_manifest.rs crates/volparossa/examples/remember_traffic_manifest.rs
           cargo build --locked --offline -p volparossa --bin volparossa --example remember_traffic_manifest \
             -p volparossa-agent --bin volparossa-agent -p volparossa-helper-entry --bin volparossa-helper
+          mkdir -p "$RUNNER_TEMP/map-binaries/examples"
+          install -s -m0755 target/debug/{volparossa,volparossa-agent,volparossa-helper} "$RUNNER_TEMP/map-binaries/"
+          install -s -m0755 target/debug/examples/remember_traffic_manifest "$RUNNER_TEMP/map-binaries/examples/"
           git diff --exit-code HEAD
           image=tests/helper/debian13-amd64-image-v1.json
           curl --fail --show-error --silent --location --max-redirs 3 --proto '=https' --proto-redir '=https' \
@@ -79,7 +80,7 @@ jobs:
             ip link set lo up
             exec setpriv --reuid "$1" --regid "$2" --clear-groups --inh-caps=-all --ambient-caps=-all \
               --bounding-set=-all --no-new-privs --reset-env -- "$3/tests/native-traffic/run.sh" \
-              "$4/organic-source" "$4/organic-build" "$4/map-inputs" "$3/build/core" "$3/build/core/target/debug" \
+              "$4/organic-source" "$4/organic-build" "$4/map-inputs" "$3/build/core" "$4/map-binaries" \
               "$4/map-debian.qcow2" "$4/map-result" kvm
           ' offline-map "$(id -u)" "$kvm_gid" "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9

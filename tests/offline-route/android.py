@@ -147,6 +147,7 @@ for _ in range(120):
     time.sleep(2)
 else:
     raise RuntimeError("emulator startup timeout")
+print("Android booted", flush=True)
 device("input", "keyevent", "KEYCODE_WAKEUP")
 device("wm", "dismiss-keyguard")
 device("cmd", "connectivity", "airplane-mode", "enable")
@@ -154,6 +155,7 @@ device("svc", "wifi", "disable")
 device("svc", "data", "disable")
 assert_offline()
 assert adb("install", "--no-streaming", INPUTS / "OrganicMaps.apk", timeout=120).endswith("Success")
+print("Organic Maps installed", flush=True)
 set_adb_identity("root", "0")
 # Bootstrap the original app so Android creates its own scoped storage and
 # Organic Maps selects its real writable directory before any bytes are staged.
@@ -193,6 +195,7 @@ device("chmod", "0700", base)
 for name in PINS["maps"]:
     device("chmod", "0600", base + "/" + name + ".mwm")
 device("restorecon", "-RF", base)
+print("Verified the three map files on the device", flush=True)
 set_adb_identity("unroot", "2000")
 # Both endpoints are explicit. Exercise the app with the ordinary Android
 # permission state a user gets by declining access to location and notifications.
@@ -216,4 +219,4 @@ result = dict(map_commit=os.environ["GITHUB_SHA"], organic_maps_source=PINS["sou
               guest_airplane_mode=True, app_stopped=True)
 if mode == "web-debug":
     result.update(android_source_build="WebDebug", application_id=PACKAGE, built_abi="x86_64")
-(INPUTS / "receipt.json").write_text(json.dumps(result, separators=(",", ":")) + "\n")
+(INPUTS / "observations.json").write_text(json.dumps(result, separators=(",", ":")) + "\n")

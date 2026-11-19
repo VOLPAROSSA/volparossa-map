@@ -1,0 +1,15 @@
+{
+  "artifact_digest": "sha256:fac637813e29c52a8dc7ce300ff38250f3d0109ddb160220038537ee0b56644a",
+  "artifact_id": 14524714137,
+  "handoff": "c18af2c4956cec3111ea8e50e5f0075f587c2da5aa9b04a7801260ae86b95714",
+  "head": "b23170332c36c221daacd3df60d8ac98aabc7345",
+  "members": {
+    "drape-expiry.json": "cacbe3fdb3d1df945411dbfedc7b36d01ff9dbbabba946fe6a21c224e5bef3b1",
+    "drape-removal.json": "842de803dca12cc3d4ab026a370a828155fd1b6f8f8b1caa5640d7143c974b50",
+    "route-expiry.json": "860337c1ccf101ba94a9ab6b6575a2b7edd9e90e5fd18adea3a8564f8992937f",
+    "route-replacement.json": "554be87b149659f80fd526a552f9446e1710ff9484cb5da48030e499c46607c8"
+  },
+  "run": "44514448577",
+  "tested": "dcc95b16a945e9838b19b5846bfcee13a8383750",
+  "tree": "63f177c29ca77ba0e8d6bc83756a06e508bd61e4"
+}

@@ -31,10 +31,10 @@ printf 'no\n' | "$trial/sdk/cmdline-tools/latest/bin/avdmanager" create avd --na
     --package 'system-images;android-35;default;x86_64' --device pixel_5
 # Only this ephemeral guest namespace gets loopback. The parent runner's
 # addresses, routes, DNS configuration and device permissions are untouched.
-sudo -n /usr/bin/unshare --net -- /bin/bash -ceu '
+sudo -n /usr/bin/unshare --net --pid --fork --kill-child=KILL --mount-proc -- /bin/bash -ceu '
     ip link set lo up
     exec /usr/bin/setpriv --reuid "$1" --regid "$2" --clear-groups --inh-caps=-all --ambient-caps=-all \
         --bounding-set=-all --no-new-privs --reset-env -- /usr/bin/env HOME="$3/home" ANDROID_HOME="$3/sdk" \
         ANDROID_SDK_ROOT="$3/sdk" ANDROID_USER_HOME="$3/android-home" ANDROID_AVD_HOME="$3/avds" TMPDIR="$3/tmp" \
-        GITHUB_SHA="$4" PATH=/usr/bin:/bin /bin/bash "$5/tests/offline-route/run-guest.sh" "$3" "$5" "$6"
+        GITHUB_SHA="$4" PATH=/usr/bin:/bin /usr/bin/python3 -B "$5/tests/offline-route/run_guest.py" "$3" "$6"
 ' offline-map "$runner_uid" "$kvm_gid" "$trial" "$GITHUB_SHA" "$repo" "$mode"

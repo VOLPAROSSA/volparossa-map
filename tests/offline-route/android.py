@@ -34,6 +34,17 @@ def device(*args, **kwargs):
     return adb("shell", shlex.join(map(str, args)), **kwargs)
 
 
+def set_adb_identity(command, uid):
+    for _ in range(6):
+        adb("wait-for-device", timeout=20)
+        if device("id", "-u", check=False) == uid:
+            return
+        adb(command, check=False)
+        time.sleep(1)
+    adb("wait-for-device", timeout=20)
+    assert device("id", "-u") == uid, "unexpected Android shell identity"
+
+
 def assert_offline():
     assert [name for _, name in socket.if_nameindex()] == ["lo"]
     assert device("settings", "get", "global", "airplane_mode_on") == "1"
@@ -131,8 +142,7 @@ device("svc", "wifi", "disable")
 device("svc", "data", "disable")
 assert_offline()
 assert adb("install", "--no-streaming", INPUTS / "OrganicMaps.apk", timeout=120).endswith("Success")
-assert adb("root").startswith(("restarting adbd as root", "adbd is already running as root"))
-adb("wait-for-device")
+set_adb_identity("root", "0")
 # Bootstrap the original app so Android creates its own scoped storage and
 # Organic Maps selects its real writable directory before any bytes are staged.
 device("am", "start", "-W", "-n", COMPONENT)
@@ -171,9 +181,7 @@ device("chmod", "0700", base)
 for name in PINS["maps"]:
     device("chmod", "0600", base + "/" + name + ".mwm")
 device("restorecon", "-RF", base)
-adb("unroot")
-adb("wait-for-device")
-assert device("id", "-u") == "2000"
+set_adb_identity("unroot", "2000")
 # Both endpoints are explicit. Exercise the app with the ordinary Android
 # permission state a user gets by declining access to location and notifications.
 for permission in ("ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "POST_NOTIFICATIONS"):

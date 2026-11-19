@@ -1,0 +1,875 @@
+diff --git a/libs/coding/files_container.hpp b/libs/coding/files_container.hpp
+index 31210c133a9db2c6f7e3e5506406545d64f67b4a..49183698621b62750d7ef904d6487dbc7ada2963 100644
+--- a/libs/coding/files_container.hpp
++++ b/libs/coding/files_container.hpp
+@@ -102,6 +102,7 @@ public:
+       f(m_info[i].m_tag);
+   }
+ 
++  TReader const & GetFileReader() const { return m_source; }
+   uint64_t GetFileSize() const { return m_source.Size(); }
+   std::string const & GetFileName() const { return m_source.GetName(); }
+ 
+diff --git a/libs/map/framework.cpp b/libs/map/framework.cpp
+index 192d95f5bf6e8391a89fdcbd08dbd9abf8dd392f..7b879b52067f2760fda9a00c05467c5c88927628 100644
+--- a/libs/map/framework.cpp
++++ b/libs/map/framework.cpp
+@@ -330,7 +330,7 @@ Framework::Framework(FrameworkParams const & params, bool loadMaps)
+ { return GetCountryInfoGetter(); }, [this](std::string const & id) -> std::string
+ { return m_storage.GetParentIdFor(id); }, [this]() -> StringsBundle const &
+ { return m_stringsBundle; }, [this]() -> power_management::PowerManager const & { return m_powerManager; }),
+-                     static_cast<RoutingManager::Delegate &>(*this))
++                     static_cast<RoutingManager::Delegate &>(*this), params.m_useLocalTrafficForRouting)
+   , m_trafficManager(std::bind(&Framework::GetMwmsByRect, this, _1, false /* rough */), kMaxTrafficCacheSizeBytes,
+                      m_routingManager.RoutingSession())
+   , m_lastReportedCountry(kInvalidCountryId)
+diff --git a/libs/map/framework.hpp b/libs/map/framework.hpp
+index 9360a92f6a2870f49fc4261a9c2c5203e131f063..ac3be3bd8faaa21196bd61880478629bbbc5852a 100644
+--- a/libs/map/framework.hpp
++++ b/libs/map/framework.hpp
+@@ -90,6 +90,7 @@ class RasterTileProvider;
+ struct FrameworkParams
+ {
+   bool m_enableDiffs = true;
++  bool m_useLocalTrafficForRouting = false;
+   size_t m_numSearchAPIThreads = 1;
+ 
+   FrameworkParams() = default;
+diff --git a/libs/map/routing_manager.cpp b/libs/map/routing_manager.cpp
+index 3b1f8da65b5c5d26e4264d350b1b82b85dad4d33..69f054703f162554848cbf076fefbb53d6131b98 100644
+--- a/libs/map/routing_manager.cpp
++++ b/libs/map/routing_manager.cpp
+@@ -323,8 +323,9 @@ drape_ptr<df::Subroute> CreateDrapeSubroute(std::vector<RouteSegment> const & se
+ }
+ }  // namespace
+ 
+-RoutingManager::RoutingManager(Callbacks && callbacks, Delegate & delegate)
++RoutingManager::RoutingManager(Callbacks && callbacks, Delegate & delegate, bool useLocalTraffic)
+   : m_callbacks(std::move(callbacks))
++  , m_useLocalTraffic(useLocalTraffic)
+   , m_delegate(delegate)
+   , m_extrapolator([this](location::GpsInfo const & gpsInfo) { this->OnExtrapolatedLocationUpdate(gpsInfo); })
+ {
+@@ -554,7 +555,7 @@ void RoutingManager::SetRouterImpl(RouterType type)
+ 
+     router = std::make_unique<IndexRouter>(vehicleType, m_loadAltitudes, m_callbacks.m_countryParentNameGetterFn,
+                                            countryFileGetter, getMwmRectByName, m_numMwmIDs, m_numMwmTree,
+-                                           m_routingSession, dataSource);
++                                           m_routingSession, dataSource, m_useLocalTraffic);
+     absentFinder = std::make_unique<AbsentRegionsFinder>(countryFileGetter, localFileChecker, m_numMwmIDs, dataSource);
+   }
+ 
+diff --git a/libs/map/routing_manager.hpp b/libs/map/routing_manager.hpp
+index 4ff7f6a8edc5946b7e85930372771bd7eabf6416..42e86f4fb57298f4d20cbf9702a40b4cd9493e32 100644
+--- a/libs/map/routing_manager.hpp
++++ b/libs/map/routing_manager.hpp
+@@ -110,7 +110,7 @@ public:
+   };
+   using RouteRecommendCallback = std::function<void(Recommendation)>;
+ 
+-  RoutingManager(Callbacks && callbacks, Delegate & delegate);
++  RoutingManager(Callbacks && callbacks, Delegate & delegate, bool useLocalTraffic = false);
+   void Init(std::shared_ptr<routing::NumMwmIds> ptr);
+ 
+   void SetBookmarkManager(BookmarkManager * bmManager);
+@@ -367,6 +367,7 @@ private:
+   RouteSpeedCamsClearCallback m_routeSpeedCamsClearCallback;
+   RouteRecommendCallback m_routeRecommendCallback;
+   Callbacks m_callbacks;
++  bool const m_useLocalTraffic;
+   df::DrapeEngineSafePtr m_drapeEngine;
+   routing::RouterType m_currentRouterType = routing::RouterType::Count;
+   bool m_loadAltitudes = false;
+diff --git a/libs/map/traffic_manager.cpp b/libs/map/traffic_manager.cpp
+index e17684d13df38b4e47a712af8e29544de44926c4..aec2bc5e7f85942ccc039a1afa371775b9cabf54 100644
+--- a/libs/map/traffic_manager.cpp
++++ b/libs/map/traffic_manager.cpp
+@@ -82,6 +82,50 @@ void TrafficManager::SetStateListener(TrafficStateChangedFn const & onStateChang
+   m_onStateChangedFn = onStateChangedFn;
+ }
+ 
++void TrafficManager::UseLocalTraffic()
++{
++  SetEnabled(false);
++  m_localOnly = true;
++  SetEnabled(true);
++}
++
++void TrafficManager::ClearLocalTraffic()
++{
++  if (!m_localTraffic)
++    return;
++  auto const id = m_localTraffic->GetMwmId();
++  m_localTraffic.reset();
++  m_drapeEngine.SafeCall(&df::DrapeEngine::ClearTrafficCache, id);
++  m_observer.OnTrafficInfoRemoved(id);
++}
++
++void TrafficManager::ApplyLocalTraffic(traffic::TrafficInfo info, std::chrono::system_clock::time_point expires)
++{
++  ClearLocalTraffic();
++  auto const remaining = expires - std::chrono::system_clock::now();
++  if (!m_localOnly || !IsEnabled() || remaining <= decltype(remaining)::zero() || !info.GetMwmId().IsAlive() ||
++      !info.GetMwmId().GetInfo()->IsRegistered() || info.GetColoring().empty())
++    return;
++  m_localExpires = expires;
++  m_localDeadline = std::chrono::steady_clock::now() +
++                    std::chrono::duration_cast<std::chrono::steady_clock::duration>(remaining);
++  m_localTraffic = std::move(info);
++  RestoreLocalTrafficLayer();
++  if (m_localTraffic)
++    m_observer.OnTrafficInfoAdded(traffic::TrafficInfo(*m_localTraffic));
++}
++
++void TrafficManager::RestoreLocalTrafficLayer()
++{
++  if (!m_localTraffic)
++    return;
++  if (std::chrono::system_clock::now() >= m_localExpires || std::chrono::steady_clock::now() >= m_localDeadline ||
++      !m_localTraffic->GetMwmId().GetInfo()->IsRegistered())
++    ClearLocalTraffic();
++  else
++    m_drapeEngine.SafeCall(&df::DrapeEngine::UpdateTraffic, *m_localTraffic);
++}
++
+ void TrafficManager::SetEnabled(bool enabled)
+ {
+   {
+@@ -94,6 +138,12 @@ void TrafficManager::SetEnabled(bool enabled)
+ 
+   m_drapeEngine.SafeCall(&df::DrapeEngine::EnableTraffic, enabled);
+ 
++  if (m_localOnly)
++  {
++    if (!enabled)
++      ClearLocalTraffic();
++    return;
++  }
+   if (enabled)
+     Invalidate();
+   else
+@@ -102,6 +152,7 @@ void TrafficManager::SetEnabled(bool enabled)
+ 
+ void TrafficManager::Clear()
+ {
++  ClearLocalTraffic();
+   std::lock_guard<std::mutex> lock(m_mutex);
+   ClearImpl();
+ 
+@@ -123,6 +174,8 @@ void TrafficManager::ClearImpl()
+ void TrafficManager::SetDrapeEngine(ref_ptr<df::DrapeEngine> engine)
+ {
+   m_drapeEngine.Set(engine);
++  if (engine && m_localOnly)
++    RestoreLocalTrafficLayer();
+ }
+ 
+ void TrafficManager::SetCurrentDataVersion(int64_t dataVersion)
+@@ -132,6 +185,12 @@ void TrafficManager::SetCurrentDataVersion(int64_t dataVersion)
+ 
+ void TrafficManager::OnMwmDeregistered(platform::LocalCountryFile const & countryFile)
+ {
++  if (m_localOnly)
++  {
++    if (m_localTraffic && m_localTraffic->GetMwmId().IsDeregistered(countryFile))
++      ClearLocalTraffic();
++    return;
++  }
+   if (!IsEnabled())
+     return;
+ 
+@@ -159,6 +218,8 @@ void TrafficManager::OnDestroySurface()
+ 
+ void TrafficManager::OnRecoverSurface()
+ {
++  if (m_localOnly)
++    RestoreLocalTrafficLayer();
+   Resume();
+ }
+ 
+@@ -179,6 +240,8 @@ void TrafficManager::Invalidate()
+ void TrafficManager::UpdateActiveMwms(m2::RectD const & rect, std::vector<MwmSet::MwmId> & lastMwmsByRect,
+                                       std::set<MwmSet::MwmId> & activeMwms)
+ {
++  if (m_localOnly)
++    return;
+   auto mwms = m_getMwmsByRectFn(rect);
+   if (lastMwmsByRect == mwms)
+     return;
+@@ -232,7 +295,7 @@ void TrafficManager::ThreadRoutine()
+   {
+     for (auto const & mwm : mwms)
+     {
+-      if (!mwm.IsAlive())
++      if (m_localOnly || !mwm.IsAlive())
+         continue;
+ 
+       traffic::TrafficInfo info(mwm, m_currentDataVersion);
+@@ -313,6 +376,8 @@ void TrafficManager::RequestTrafficData(MwmSet::MwmId const & mwmId, bool force)
+ 
+ void TrafficManager::RequestTrafficData()
+ {
++  if (m_localOnly)
++    return;
+   if ((m_activeDrapeMwms.empty() && m_activeRoutingMwms.empty()) || !IsEnabled() || IsInvalidState() || m_isPaused)
+     return;
+ 
+@@ -453,6 +518,8 @@ bool TrafficManager::IsInvalidState() const
+ 
+ void TrafficManager::UpdateState()
+ {
++  if (m_localOnly)
++    return;
+   if (!IsEnabled() || IsInvalidState())
+     return;
+ 
+diff --git a/libs/map/traffic_manager.hpp b/libs/map/traffic_manager.hpp
+index 0ee74912c014714b75499e948e46512f65bfaf74..c8c86d3941952d6b08e7bd3742d8f4f1e7234dba 100644
+--- a/libs/map/traffic_manager.hpp
++++ b/libs/map/traffic_manager.hpp
+@@ -67,6 +67,12 @@ public:
+   void SetDrapeEngine(ref_ptr<df::DrapeEngine> engine);
+   void SetCurrentDataVersion(int64_t dataVersion);
+ 
++  // GUI thread. Use only the local feed until the manager is destroyed.
++  void UseLocalTraffic();
++  void ClearLocalTraffic();
++  void ApplyLocalTraffic(traffic::TrafficInfo info, std::chrono::system_clock::time_point expires);
++  bool HasLocalTraffic() const { return m_localTraffic.has_value(); }
++
+   void SetEnabled(bool enabled);
+   bool IsEnabled() const;
+ 
+@@ -156,6 +162,11 @@ private:
+   std::pair<MyPosition, bool> m_currentPosition = {MyPosition(), false};
+   std::pair<ScreenBase, bool> m_currentModelView = {ScreenBase(), false};
+ 
++  void RestoreLocalTrafficLayer();
++  std::atomic<bool> m_localOnly{false};
++  std::optional<traffic::TrafficInfo> m_localTraffic;
++  std::chrono::system_clock::time_point m_localExpires;
++  std::chrono::steady_clock::time_point m_localDeadline;
+   std::atomic<TrafficState> m_state;
+   TrafficStateChangedFn m_onStateChangedFn;
+ 
+diff --git a/libs/routing/index_router.cpp b/libs/routing/index_router.cpp
+index f794e13398a357cdb467cea08bbfd0b8ecf6dd6c..03bb9ed7ed62d9b738db562c581c6ee6939d1693 100644
+--- a/libs/routing/index_router.cpp
++++ b/libs/routing/index_router.cpp
+@@ -156,12 +156,6 @@ std::unique_ptr<DirectionsEngine> CreateDirectionsEngine(VehicleType vehicleType
+   UNREACHABLE();
+ }
+ 
+-std::shared_ptr<TrafficStash> CreateTrafficStash(VehicleType, std::shared_ptr<NumMwmIds>, traffic::TrafficCache const &)
+-{
+-  return nullptr;
+-  // return (vehicleType == VehicleType::Car ? make_shared<TrafficStash>(trafficCache, numMwmIds) : nullptr);
+-}
+-
+ void PushPassedSubroutes(Checkpoints const & checkpoints, std::vector<Route::SubrouteAttrs> & subroutes)
+ {
+   for (size_t i = 0; i < checkpoints.GetPassedIdx(); ++i)
+@@ -331,7 +325,7 @@ IndexRouter::IndexRouter(VehicleType vehicleType, bool loadAltitudes,
+                          CountryParentNameGetterFn const & countryParentNameGetterFn,
+                          TCountryFileFn const & countryFileFn, CountryRectFn const & countryRectFn,
+                          std::shared_ptr<NumMwmIds> numMwmIds, std::shared_ptr<m4::Tree<NumMwmId>> numMwmTree,
+-                         traffic::TrafficCache const & trafficCache, DataSource & dataSource)
++                         traffic::TrafficCache const & trafficCache, DataSource & dataSource, bool useLocalTraffic)
+   : m_vehicleType(vehicleType)
+   , m_loadAltitudes(loadAltitudes)
+   , m_name("astar-bidirectional-" + ToString(m_vehicleType))
+@@ -341,7 +335,8 @@ IndexRouter::IndexRouter(VehicleType vehicleType, bool loadAltitudes,
+   , m_countryRectFn(countryRectFn)
+   , m_numMwmIds(std::move(numMwmIds))
+   , m_numMwmTree(std::move(numMwmTree))
+-  , m_trafficStash(CreateTrafficStash(m_vehicleType, m_numMwmIds, trafficCache))
++  , m_trafficStash(useLocalTraffic && m_vehicleType == VehicleType::Car
++                       ? std::make_shared<TrafficStash>(trafficCache, m_numMwmIds) : nullptr)
+   , m_roadGraph(m_dataSource,
+                 vehicleType == VehicleType::Pedestrian || vehicleType == VehicleType::Transit
+                     ? IRoadGraph::Mode::IgnoreOnewayTag
+diff --git a/libs/routing/index_router.hpp b/libs/routing/index_router.hpp
+index 25c10447773f4fe5675bc6c595512ccabb3fa25e..5aef6ea67e1c0d0c254d27bd071fc6e9ab51de24 100644
+--- a/libs/routing/index_router.hpp
++++ b/libs/routing/index_router.hpp
+@@ -71,7 +71,7 @@ public:
+   IndexRouter(VehicleType vehicleType, bool loadAltitudes, CountryParentNameGetterFn const & countryParentNameGetterFn,
+               TCountryFileFn const & countryFileFn, CountryRectFn const & countryRectFn,
+               std::shared_ptr<NumMwmIds> numMwmIds, std::shared_ptr<m4::Tree<NumMwmId>> numMwmTree,
+-              traffic::TrafficCache const & trafficCache, DataSource & dataSource);
++              traffic::TrafficCache const & trafficCache, DataSource & dataSource, bool useLocalTraffic = false);
+ 
+   std::unique_ptr<WorldGraph> MakeSingleMwmWorldGraph();
+ 
+diff --git a/libs/routing/traffic_stash.cpp b/libs/routing/traffic_stash.cpp
+index 61962fbe2fd897e5a59adb9d3f34f18a4668c2a4..898305b059e266d70f0d0975fc5e7ccf030568ce 100644
+--- a/libs/routing/traffic_stash.cpp
++++ b/libs/routing/traffic_stash.cpp
+@@ -47,6 +47,8 @@ void TrafficStash::CopyTraffic()
+   m_source.CopyTraffic(copy);
+   for (auto const & kv : copy)
+   {
++    if (!kv.first.IsAlive() || !kv.first.GetInfo()->IsRegistered())
++      continue;
+     auto const numMwmId = m_numMwmIds->GetId(kv.first.GetInfo()->GetLocalFile().GetCountryFile());
+     CHECK(kv.second, ());
+     SetColoring(numMwmId, kv.second);
+diff --git a/libs/traffic/traffic_info.cpp b/libs/traffic/traffic_info.cpp
+index 605a746a69e3c0243439a77ba2fdda49a6138956..0d7ed51aa67f59324b797987506a90cd7dcd3425 100644
+--- a/libs/traffic/traffic_info.cpp
++++ b/libs/traffic/traffic_info.cpp
+@@ -128,6 +128,16 @@ TrafficInfo::TrafficInfo(MwmSet::MwmId const & mwmId, int64_t currentDataVersion
+   }
+ }
+ 
++TrafficInfo TrafficInfo::FromLocalColoring(MwmSet::MwmId const & id, Coloring coloring)
++{
++  // The network constructor can fetch traffic keys. This local input already has directed keys.
++  TrafficInfo info;
++  info.m_mwmId = id;
++  info.m_availability = Availability::IsAvailable;
++  info.m_coloring = std::move(coloring);
++  return info;
++}
++
+ // static
+ TrafficInfo TrafficInfo::BuildForTesting(Coloring && coloring)
+ {
+diff --git a/libs/traffic/traffic_info.hpp b/libs/traffic/traffic_info.hpp
+index 5981a8aab42a74501dd0830dd8cd1b88fb951ce8..65f2eda7b1560d37a955f95b75952509af081a20 100644
+--- a/libs/traffic/traffic_info.hpp
++++ b/libs/traffic/traffic_info.hpp
+@@ -75,6 +75,8 @@ public:
+ 
+   TrafficInfo(MwmSet::MwmId const & mwmId, int64_t currentDataVersion);
+ 
++  static TrafficInfo FromLocalColoring(MwmSet::MwmId const & id, Coloring coloring);
++
+   static TrafficInfo BuildForTesting(Coloring && coloring);
+   void SetTrafficKeysForTesting(std::vector<RoadSegmentId> const & keys);
+ 
+diff --git a/qt/CMakeLists.txt b/qt/CMakeLists.txt
+index 2ae7d51c99a809771d6d36e6e3fc173118c2a495..d50c54b1674ef7967898bb110880517d53023a28 100644
+--- a/qt/CMakeLists.txt
++++ b/qt/CMakeLists.txt
+@@ -63,6 +63,10 @@ set(SRC
+   update_dialog.hpp
+ )
+ 
++if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
++  list(APPEND SRC local_traffic.cpp local_traffic.hpp)
++endif()
++
+ omim_add_executable(${PROJECT_NAME} MACOSX_BUNDLE ${RES_SOURCES} ${SRC})
+ 
+ set_target_properties(${PROJECT_NAME} PROPERTIES AUTOMOC ON)
+diff --git a/qt/local_traffic.cpp b/qt/local_traffic.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..ea5ed017d79a0a1d072fca4e1602faffe6aaf1a1
+--- /dev/null
++++ b/qt/local_traffic.cpp
+@@ -0,0 +1,428 @@
++// SPDX-License-Identifier: GPL-3.0-only
++#include "qt/local_traffic.hpp"
++
++#include "map/framework.hpp"
++#include "routing_common/car_model.hpp"
++#include "indexer/feature.hpp"
++#include "base/logging.hpp"
++
++#include <glaze/json.hpp>
++#include <QCryptographicHash>
++#include <QTimer>
++#include <QUuid>
++
++#include <algorithm>
++#include <array>
++#include <chrono>
++#include <filesystem>
++#include <optional>
++#include <string_view>
++#include <utility>
++#include <vector>
++#include <sys/file.h>
++#include <sys/stat.h>
++#include <fcntl.h>
++#include <unistd.h>
++
++namespace qt
++{
++namespace
++{
++using namespace std::chrono;
++using Info = traffic::TrafficInfo;
++constexpr size_t kMaxBytes = 2 * 1024 * 1024;
++
++struct Road
++{
++  uint32_t feature_id, segment_index, direction, speed_group, observation_count;
++};
++struct Scope
++{
++  std::string observation_counts;
++  bool independent_users_verified, anonymity_guaranteed, advisory_only, unknown_is_free_flow, unexpired_replay_detection;
++};
++struct Snapshot
++{
++  std::string format, region;
++  uint32_t map_version;
++  std::string map_sha256;
++  uint64_t window_start, window_end, expires;
++  std::vector<Road> roads;
++  Scope scope;
++};
++struct Envelope
++{
++  std::string format, publisher_key;
++  uint64_t revision;
++  std::string manifest_id;
++  Snapshot snapshot;
++};
++struct Floor
++{
++  uint64_t revision, window_end;
++  std::string manifest, digest;
++};
++struct StrictJson : glz::opts
++{
++  bool validate_trailing_whitespace = true;
++};
++constexpr StrictJson kStrict = [] { StrictJson opts; opts.error_on_missing_keys = true; return opts; }();
++
++bool Hex(std::string_view value)
++{
++  return value.size() == 64 && std::all_of(value.begin(), value.end(), [](char c)
++  { return (c >= 'a' && c <= 'f') || (c >= '0' && c <= '9'); });
++}
++
++std::string Hash(std::string const & bytes)
++{
++  return QCryptographicHash::hash(QByteArrayView(bytes), QCryptographicHash::Sha256).toHex().toStdString();
++}
++
++// Glaze enforces the field set and all required members. Count member separators outside
++// strings to also reject duplicate members, which would otherwise replace an existing member.
++size_t Members(std::string const & bytes)
++{
++  bool quoted = false, escaped = false;
++  size_t members = 0;
++  for (char c : bytes)
++  {
++    if (escaped) { escaped = false; continue; }
++    if (quoted && c == '\\') escaped = true;
++    else if (c == '"') quoted = !quoted;
++    else if (!quoted && c == ':') ++members;
++  }
++  return members;
++}
++
++bool Valid(Envelope const & envelope, uint64_t now, std::string const & publisher, std::string const & region)
++{
++  auto const & s = envelope.snapshot;
++  auto const & scope = s.scope;
++  return envelope.format == "volparossa-local-traffic-v1" && envelope.publisher_key == publisher && envelope.revision > 0 &&
++         Hex(envelope.manifest_id) && s.format == "volparossa-road-traffic-v1" && s.region == region && s.map_version > 0 &&
++         Hex(s.map_sha256) && s.window_start < s.window_end && s.window_end - s.window_start <= 300 &&
++         s.window_end <= now && now < s.expires && s.expires - s.window_end <= 300 && s.roads.size() <= 4096 &&
++         scope.observation_counts == "publisher_assertions" && scope.advisory_only && !scope.independent_users_verified &&
++         !scope.anonymity_guaranteed && !scope.unknown_is_free_flow && !scope.unexpired_replay_detection;
++}
++
++struct Fd
++{
++  explicit Fd(int n = -1) : fd(n) {}
++  Fd(Fd const &) = delete;
++  Fd & operator=(Fd const &) = delete;
++  Fd(Fd && other) : fd(std::exchange(other.fd, -1)) {}
++  ~Fd() { if (fd >= 0) close(fd); }
++  int fd;
++};
++
++bool Same(struct stat const & a, struct stat const & b)
++{
++  return a.st_dev == b.st_dev && a.st_ino == b.st_ino && a.st_mode == b.st_mode &&
++         a.st_uid == b.st_uid && a.st_nlink == b.st_nlink && a.st_size == b.st_size &&
++         a.st_mtim.tv_sec == b.st_mtim.tv_sec && a.st_mtim.tv_nsec == b.st_mtim.tv_nsec &&
++         a.st_ctim.tv_sec == b.st_ctim.tv_sec && a.st_ctim.tv_nsec == b.st_ctim.tv_nsec;
++}
++
++Fd OpenParent(std::filesystem::path const & path)
++{
++  Fd result(open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC));
++  for (auto const & item : path.parent_path().relative_path())
++  {
++    int next = openat(result.fd, item.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
++    if (next < 0) return Fd();
++    close(std::exchange(result.fd, next));
++  }
++  struct stat st{};
++  if (fstat(result.fd, &st) != 0 || st.st_uid != geteuid() || (st.st_mode & 07777) != 0700)
++    return Fd();
++  return result;
++}
++
++bool PrivateFile(int fd, struct stat & st, size_t max)
++{
++  return fd >= 0 && fstat(fd, &st) == 0 && S_ISREG(st.st_mode) && st.st_uid == geteuid() && st.st_nlink == 1 &&
++         (st.st_mode & 07777) == 0600 && st.st_size > 0 && static_cast<uint64_t>(st.st_size) <= max;
++}
++
++bool ReadStable(int fd, struct stat const & before, std::string & bytes)
++{
++  bytes.resize(static_cast<size_t>(before.st_size));
++  size_t pos = 0;
++  while (pos < bytes.size())
++  {
++    auto const n = read(fd, bytes.data() + pos, bytes.size() - pos);
++    if (n <= 0) return false;
++    pos += n;
++  }
++  struct stat after{};
++  return fstat(fd, &after) == 0 && Same(before, after);
++}
++
++// Serialize concurrent app instances and replace the durable floor atomically. An invalid existing floor fails closed. State is private to this feed slot.
++bool AdvanceFloor(int parent, std::string const & name, Floor const & next)
++{
++  if (flock(parent, LOCK_EX | LOCK_NB) != 0) return false;
++  Fd previous(openat(parent, name.c_str(), O_RDONLY | O_CLOEXEC | O_NONBLOCK | O_NOFOLLOW));
++  if (previous.fd >= 0)
++  {
++    struct stat st{};
++    Floor old{};
++    std::string bytes;
++    if (!PrivateFile(previous.fd, st, 512) || !ReadStable(previous.fd, st, bytes) || glz::read<kStrict>(old, bytes) ||
++        Members(bytes) != 4 || !old.revision || !Hex(old.manifest) || !Hex(old.digest) ||
++        next.revision < old.revision || next.window_end < old.window_end)
++      return false;
++    if (old.revision == next.revision)
++      return next.manifest == old.manifest && next.digest == old.digest;
++  }
++  else if (errno != ENOENT) return false;
++
++  auto const tmp = ".organic-traffic-" + QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
++  Fd file(openat(parent, tmp.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600));
++  if (file.fd < 0) return false;
++  std::string bytes;
++  bool const saved = !glz::write_json(next, bytes) &&
++                     write(file.fd, bytes.data(), bytes.size()) == static_cast<ssize_t>(bytes.size()) &&
++                     fsync(file.fd) == 0 && renameat(parent, tmp.c_str(), parent, name.c_str()) == 0;
++  if (!saved) unlinkat(parent, tmp.c_str(), 0);
++  return saved && fsync(parent) == 0;
++}
++
++bool Coloring(Snapshot const & s, FeaturesLoaderGuard const & loader, Info::Coloring & coloring)
++{
++  auto const & model = routing::CarModel::AllLimitsInstance();
++  std::optional<Info::RoadSegmentId> last;
++  std::unique_ptr<FeatureType> ft;
++  size_t points = 0;
++  bool oneWay = false;
++  for (auto const & road : s.roads)
++  {
++    if (road.segment_index >= 32768 || road.direction > 1 || road.speed_group > 7 || road.speed_group == 6 ||
++        (road.speed_group != 7 && road.observation_count < 5))
++      return false;
++    Info::RoadSegmentId const key(road.feature_id, road.segment_index, road.direction);
++    if (last && !(*last < key)) return false;  // The adapter emits sorted unique directed keys.
++    if (!last || road.feature_id != last->GetFid())
++    {
++      if (road.feature_id >= loader.GetNumFeatures()) return false;
++      ft = loader.GetOriginalFeatureByIndex(road.feature_id);
++      if (!ft) return false;
++      feature::TypesHolder const types(*ft);
++      if (!model.IsRoad(types)) return false;
++      oneWay = model.IsOneWay(types);
++      ft->ParseGeometry(FeatureType::BEST_GEOMETRY);
++      points = ft->GetPointsCount();
++    }
++    if (road.segment_index + 1 >= points || (oneWay && road.direction)) return false;
++    if (road.speed_group != 7) coloring.emplace(key, static_cast<traffic::SpeedGroup>(road.speed_group));
++    last = key;
++  }
++  return true;
++}
++
++class LocalTraffic final : public QObject
++{
++public:
++  LocalTraffic(Framework & framework, std::filesystem::path path, std::string publisher, std::string region)
++    : m_framework(framework), m_path(std::move(path)), m_publisher(std::move(publisher)), m_region(std::move(region))
++  {
++    Manager().UseLocalTraffic();
++    m_timer.setTimerType(Qt::PreciseTimer);
++    connect(&m_timer, &QTimer::timeout, this, [this]() { Refresh(); });
++    m_timer.start(250);
++  }
++
++  ~LocalTraffic() override { Manager().ClearLocalTraffic(); }
++
++private:
++  TrafficManager & Manager() { return m_framework.GetTrafficManager(); }
++
++  void Clear()
++  {
++    if (Manager().HasLocalTraffic()) LOG(LINFO, ("Local advisory traffic cleared"));
++    Manager().ClearLocalTraffic();
++    m_applied = false;
++  }
++
++  void ResetMap()
++  {
++    Clear();
++    m_loader.reset();
++    m_map = {};
++    m_hash.reset();
++    m_offset = 0;
++    m_mapDigest.clear();
++  }
++
++  bool Load(int parent)
++  {
++    Fd file(openat(parent, m_path.filename().c_str(), O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC));
++    struct stat st{};
++    if (!PrivateFile(file.fd, st, kMaxBytes)) return false;
++    if (m_envelope && Same(m_inputStamp, st)) return true;
++
++    Clear();
++    m_envelope.reset();
++    std::string bytes;
++    Envelope envelope{};
++    if (!ReadStable(file.fd, st, bytes) || glz::read<kStrict>(envelope, bytes) ||
++        !Valid(envelope, Now(), m_publisher, m_region) || Members(bytes) != 20 + 5 * envelope.snapshot.roads.size())
++      return false;
++    m_inputDigest = Hash(bytes);
++    m_inputStamp = st;
++    auto const remaining = system_clock::time_point(seconds(envelope.snapshot.expires)) - system_clock::now();
++    m_deadline = steady_clock::now() + duration_cast<steady_clock::duration>(remaining);
++    m_envelope = std::move(envelope);
++    return true;
++  }
++
++  uint64_t Now() const { return duration_cast<seconds>(system_clock::now().time_since_epoch()).count(); }
++
++  // Read the actual registered reader in bounded slices on the owning thread. Surface, map
++  // registration, cancellation and expiry events can run between slices even for large maps.
++  bool BindMap(Snapshot const & s)
++  {
++    auto const & data = m_framework.GetDataSource();
++    auto const id = data.GetMwmIdByCountryFile(platform::CountryFile(m_region));
++    if (!id.IsAlive() || !id.GetInfo()->IsRegistered() || id.GetInfo()->GetType() != MwmInfo::COUNTRY ||
++        id.GetInfo()->GetVersion() != s.map_version || id.GetInfo()->m_version.GetVersion() != s.map_version)
++    {
++      ResetMap();
++      return false;
++    }
++    auto const path = id.GetInfo()->GetLocalFile().GetPath(MapFileType::Map);
++    struct stat st{};
++    if (lstat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode) || st.st_size <= 0)
++    {
++      if (id == m_seenId) m_replaced = true;
++      ResetMap();
++      return false;
++    }
++    if (!(id == m_seenId))
++    {
++      m_seenId = id;
++      m_seenStamp = st;
++      m_replaced = false;
++    }
++    // A physical replacement cannot inherit the old registration, even if the file
++    // is restored. Organic Maps must register the new generation before it is trusted.
++    if (!Same(st, m_seenStamp)) m_replaced = true;
++    if (m_replaced)
++    {
++      ResetMap();
++      return false;
++    }
++    if (!(id == m_map))
++    {
++      ResetMap();
++      m_map = id;
++      m_loader = std::make_unique<FeaturesLoaderGuard>(data, id);
++      if (!m_loader->GetHandle().IsAlive() || m_loader->GetContainer().GetFileSize() != static_cast<uint64_t>(st.st_size))
++      {
++        ResetMap();
++        return false;
++      }
++    }
++    if (!m_mapDigest.empty()) return m_mapDigest == s.map_sha256;
++    auto const & reader = m_loader->GetContainer().GetFileReader();
++    auto const size = std::min<uint64_t>(reader.Size() - m_offset, m_buffer.size());
++    reader.Read(m_offset, m_buffer.data(), size);
++    m_hash.addData(QByteArrayView(m_buffer.data(), static_cast<qsizetype>(size)));
++    m_offset += size;
++    if (m_offset != reader.Size())
++    {
++      m_timer.start(1);
++      return false;
++    }
++    m_mapDigest = m_hash.result().toHex().toStdString();
++    // Check both registration and physical file identity again after the final slice.
++    m_timer.start(1);
++    return false;
++  }
++
++  void Refresh()
++  {
++    m_timer.setInterval(250);
++    try
++    {
++      Fd parent = OpenParent(m_path);
++      if (parent.fd < 0 || !Load(parent.fd))
++      {
++        m_envelope.reset();
++        ResetMap();
++        return;
++      }
++      auto const & envelope = *m_envelope;
++      auto const & s = envelope.snapshot;
++      if (!Manager().IsEnabled() || Now() >= s.expires || steady_clock::now() >= m_deadline || Now() < s.window_end)
++      {
++        ResetMap();
++        return;
++      }
++      auto const wallLeft = system_clock::time_point(seconds(s.expires)) - system_clock::now();
++      auto const steadyLeft = m_deadline - steady_clock::now();
++      auto const tick = std::min(ceil<milliseconds>(wallLeft), ceil<milliseconds>(steadyLeft));
++      m_timer.setInterval(std::clamp(tick, milliseconds(1), milliseconds(250)));
++      if (!BindMap(s))
++      {
++        Clear();
++        return;
++      }
++      if (m_applied && (m_empty || Manager().HasLocalTraffic())) return;
++      Info::Coloring coloring;
++      if (!Coloring(s, *m_loader, coloring))
++      {
++        Clear();
++        return;
++      }
++      auto const name = ".organic-traffic-" + Hash(m_publisher + "/" + m_region + "/" + std::to_string(s.map_version));
++      if (!AdvanceFloor(parent.fd, name, {envelope.revision, s.window_end, envelope.manifest_id, m_inputDigest}))
++      {
++        Clear();
++        return;
++      }
++      m_empty = coloring.empty();
++      Manager().ApplyLocalTraffic(Info::FromLocalColoring(m_map, std::move(coloring)),
++                                  system_clock::time_point(seconds(s.expires)));
++      m_applied = true;
++      LOG(LINFO, ("Local advisory traffic accepted", envelope.revision, "directed records", s.roads.size()));
++    }
++    catch (RootException const &)
++    {
++      m_envelope.reset();
++      ResetMap();
++    }
++  }
++
++  Framework & m_framework;
++  std::filesystem::path const m_path;
++  std::string const m_publisher, m_region;
++  QTimer m_timer;
++  std::optional<Envelope> m_envelope;
++  struct stat m_inputStamp{}, m_seenStamp{};
++  std::string m_inputDigest, m_mapDigest;
++  steady_clock::time_point m_deadline;
++  MwmSet::MwmId m_map, m_seenId;
++  bool m_replaced = false;
++  std::unique_ptr<FeaturesLoaderGuard> m_loader;
++  std::array<char, 1024 * 1024> m_buffer;
++  uint64_t m_offset = 0;
++  QCryptographicHash m_hash{QCryptographicHash::Sha256};
++  bool m_applied = false, m_empty = false;
++};
++}  // namespace
++
++std::unique_ptr<QObject> StartLocalTraffic(Framework & framework, std::string const & path,
++                                           std::string const & publisher, std::string const & region)
++{
++  std::filesystem::path const slot(path);
++  if (!slot.is_absolute() || slot != slot.lexically_normal() || slot.filename().empty() ||
++      slot.filename().string().starts_with(".organic-traffic-") || !Hex(publisher) || region.empty() ||
++      region.size() > 256 || region.find('/') != std::string::npos ||
++      std::any_of(region.begin(), region.end(), [](unsigned char c) { return c < 32 || c == 127; }))
++    return {};
++  return std::make_unique<LocalTraffic>(framework, slot, publisher, region);
++}
++}  // namespace qt
+diff --git a/qt/local_traffic.hpp b/qt/local_traffic.hpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..a74f33b89e5926bc3470571ad3a2df861027e618
+--- /dev/null
++++ b/qt/local_traffic.hpp
+@@ -0,0 +1,15 @@
++// SPDX-License-Identifier: GPL-3.0-only
++#pragma once
++
++#include <memory>
++#include <string>
++
++class Framework;
++class QObject;
++
++namespace qt
++{
++// Linux desktop, explicit opt-in. The returned QObject owns the refresh timer.
++std::unique_ptr<QObject> StartLocalTraffic(Framework & framework, std::string const & path,
++                                           std::string const & publisher, std::string const & region);
++}
+diff --git a/qt/main.cpp b/qt/main.cpp
+index f3d8cb26bb159342d5f1be7b8714edaf769ca43b..8c680f180b2796f6aef4fd4f5995a7ff2d2e0f83 100644
+--- a/qt/main.cpp
++++ b/qt/main.cpp
+@@ -10,6 +10,7 @@
+ #include "platform/platform.hpp"
+ #ifdef OMIM_OS_LINUX
+ #include "platform/platform_linux_migration.hpp"
++#include "qt/local_traffic.hpp"
+ #endif
+ #include "platform/preferred_languages.hpp"
+ #include "platform/settings.hpp"
+@@ -31,6 +32,12 @@
+ 
+ #include <gflags/gflags.h>
+ 
++#ifdef OMIM_OS_LINUX
++DEFINE_string(volparossa_traffic, "", "Private local Core traffic handoff file.");
++DEFINE_string(volparossa_traffic_publisher, "", "Trusted Core traffic publisher public key.");
++DEFINE_string(volparossa_traffic_region, "", "Exact installed map region for local advisory traffic.");
++#endif
++
+ DEFINE_string(data_path, "", "Path to data directory.");
+ DEFINE_string(log_abort_level, base::ToString(base::GetDefaultLogAbortLevel()),
+               "Log messages severity that causes termination.");
+@@ -211,6 +218,9 @@ int main(int argc, char * argv[])
+     qt::common::SetDefaultSurfaceFormat(QApplication::platformName());
+ 
+     FrameworkParams frameworkParams;
++#ifdef OMIM_OS_LINUX
++    frameworkParams.m_useLocalTrafficForRouting = !FLAGS_volparossa_traffic.empty();
++#endif
+ 
+ #ifdef BUILD_DESIGNER
+     QString mapcssFilePath;
+@@ -240,6 +250,19 @@ int main(int argc, char * argv[])
+ 
+     Framework framework(frameworkParams);
+     framework.SetupMeasurementSystem();
++#ifdef OMIM_OS_LINUX
++    std::unique_ptr<QObject> localTraffic;
++    if (!FLAGS_volparossa_traffic.empty() || !FLAGS_volparossa_traffic_publisher.empty() || !FLAGS_volparossa_traffic_region.empty())
++    {
++      localTraffic = qt::StartLocalTraffic(framework, FLAGS_volparossa_traffic, FLAGS_volparossa_traffic_publisher,
++                                           FLAGS_volparossa_traffic_region);
++      if (!localTraffic)
++      {
++        LOG(LERROR, ("Invalid private traffic input configuration"));
++        return 2;
++      }
++    }
++#endif
+ 
+     auto const syncNightMode = [&framework]()
+     {

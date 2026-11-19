@@ -1,0 +1,91 @@
+name: Verified traffic in Organic Maps
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/native-traffic.yml
+      - integrations/native-traffic/**
+      - tests/native-traffic/**
+      - tests/native-toolchains/traffic_frames.py
+      - src/core_traffic.py
+      - src/traffic_snapshot.py
+permissions:
+  contents: read
+concurrency:
+  group: native-traffic-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  CORE_SOURCE: 7fe73bf18d8f8f0d5b1096d4fd6485c3315a6e69
+  CARGO_BUILD_JOBS: '2'
+jobs:
+  desktop:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: VOLPAROSSA/volparossa
+          ref: ${{ env.CORE_SOURCE }}
+          path: build/core
+          persist-credentials: false
+      - name: Provision the disposable build and guest tools
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -c /dev/kvm
+          test "$(git -C build/core rev-parse HEAD)" = "$CORE_SOURCE"
+          python3 -B build/core/scripts/provision-rust189.py runner
+          sudo -n apt-get update -o APT::Update::Error-Mode=any
+          sudo -n apt-get install -y --no-install-recommends ninja-build qt6-base-dev qt6-positioning-dev libqt6svg6-dev \
+            libgl1-mesa-dev libglvnd-dev libharfbuzz-dev libxcursor-dev libxi-dev libxinerama-dev libxrandr-dev \
+            xvfb xauth mesa-utils libgl1-mesa-dri xdotool python3-pil qemu-system-x86 qemu-utils cloud-image-utils genisoimage
+      - name: Build the native desktop and fixture against the pinned upstream
+        run: |
+          set -euo pipefail
+          upstream="$RUNNER_TEMP/organic-source"
+          bash tests/native-toolchains/checkout.sh "$upstream"
+          python3 -B integrations/native-traffic/apply.py "$upstream" --routing-probe
+          cmake -S "$upstream" -B "$RUNNER_TEMP/organic-build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DCMAKE_UNITY_BUILD=ON
+          cmake --build "$RUNNER_TEMP/organic-build" --target desktop volparossa_traffic_probe --parallel "$(nproc)"
+          mkdir -m 0700 "$RUNNER_TEMP/map-inputs"
+          python3 -B tests/offline-route/inputs.py "$RUNNER_TEMP/map-inputs" --upstream "$upstream"
+      - name: Build the normal Core processes and stage the authenticated Debian image
+        working-directory: build/core
+        run: |
+          set -euo pipefail
+          cargo fetch --locked
+          install -D -m 0644 ../../tests/native-traffic/remember_manifest.rs crates/volparossa/examples/remember_traffic_manifest.rs
+          cargo build --locked --offline -p volparossa --bin volparossa --example remember_traffic_manifest \
+            -p volparossa-agent --bin volparossa-agent -p volparossa-helper-entry --bin volparossa-helper
+          mkdir -p "$RUNNER_TEMP/map-binaries/examples"
+          install -s -m0755 target/debug/{volparossa,volparossa-agent,volparossa-helper} "$RUNNER_TEMP/map-binaries/"
+          install -s -m0755 target/debug/examples/remember_traffic_manifest "$RUNNER_TEMP/map-binaries/examples/"
+          git diff --exit-code HEAD
+          image=tests/helper/debian13-amd64-image-v1.json
+          curl --fail --show-error --silent --location --max-redirs 3 --proto '=https' --proto-redir '=https' \
+            --connect-timeout 30 --max-time 600 --max-filesize 2147483648 "$(jq -er .url "$image")" -o "$RUNNER_TEMP/map-debian.qcow2"
+          settings="$RUNNER_TEMP/map-cleanup-$GITHUB_RUN_ID.gitconfig"
+          install -m0600 /dev/null "$settings"
+          echo "GIT_CONFIG_GLOBAL=$settings" >> "$GITHUB_ENV"
+      - name: Measure the actual offline renderer and routing session from a signed Core handoff
+        run: |
+          set -euo pipefail
+          kvm_gid=$(stat -Lc %g /dev/kvm)
+          test "$(getent group "$kvm_gid" | cut -d: -f1)" = kvm
+          sudo -n unshare --net -- /bin/bash -ceu '
+            ip link set lo up
+            exec setpriv --reuid "$1" --regid "$2" --clear-groups --inh-caps=-all --ambient-caps=-all \
+              --bounding-set=-all --no-new-privs --reset-env -- "$3/tests/native-traffic/run.sh" \
+              "$4/organic-source" "$4/organic-build" "$4/map-inputs" "$3/build/core" "$4/map-binaries" \
+              "$4/map-debian.qcow2" "$4/map-result" kvm
+          ' offline-map "$(id -u)" "$kvm_gid" "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: native-traffic-${{ github.sha }}
+          path: ${{ runner.temp }}/map-result/*.json
+          if-no-files-found: error
+          retention-days: 30

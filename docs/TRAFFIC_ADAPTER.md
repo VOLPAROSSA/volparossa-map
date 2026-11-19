@@ -83,7 +83,7 @@ the adapter also checks the received file length independently. This bounds the
 accepted object, not all transport overhead or retry bytes. It is not a claim
 that mobile resource scheduling is implemented.
 
-## Verification and remaining application work
+## Verification
 
 ```sh
 python3 -B -m unittest discover -s tests -p 'test_*.py' -v
@@ -96,8 +96,4 @@ explicitly synthetic. They do not prove a live peer transfer, native rendering,
 GPS aggregation, Android/iOS execution or traffic-aware navigation.
 
 The disposable peer-trial driver in `tests/peer-traffic/` uses a tiny invented directed road graph.
-It checks separate cold, disconnected cache-only and post-expiry requests. The graph is a test
-resource for the adapter. Native application still requires the real manager input
-described in [INTEGRATION.md](INTEGRATION.md), including rendering **and** route-cache
-expiry. Consent-based local observations, privacy-preserving multi-contributor
-aggregation, abuse resistance, and independent source corroboration remain open.
+It checks separate cold, disconnected cache-only and post-expiry requests. The patched Linux desktop separately consumed a normal Core handoff for the real Monaco dataset. Tests measured the change in two rendered views, the autorouter’s distance and ETA, and the removal of advisory state on expiry, withdrawal and map replacement. [Native integration and exact evidence](NATIVE_TRAFFIC.md)

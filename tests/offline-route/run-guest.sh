@@ -11,7 +11,7 @@ adb="$trial/sdk/platform-tools/adb"
 "$emu" -accel-check
 "$adb" start-server
 "$emu" -avd offline-map -port 5554 -accel on -no-window -no-audio -no-boot-anim -no-snapshot \
-    -gpu swiftshader_indirect -no-metrics -cores 2 -memory 3072 >"$trial/emulator.log" 2>&1 &
+    -gpu software -feature -Vulkan -no-metrics -cores 2 -memory 3072 >"$trial/emulator.log" 2>&1 &
 pid=$!
 finish() {
     "$adb" -s emulator-5554 emu kill >/dev/null 2>&1 || true

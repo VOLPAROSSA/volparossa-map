@@ -59,11 +59,13 @@ def open_route(start, end):
 
 def route(start, end):
     assert_offline()
+    device("logcat", "-b", "crash", "-c")
     open_route(start, end)
     deadline = time.monotonic() + 115
     retried = False
     controls = set()
     summaries = set()
+    nodes = []
     while time.monotonic() < deadline:
         try:
             nodes = layout()
@@ -94,6 +96,16 @@ def route(start, end):
             retried = True
         time.sleep(1)
     print("Observed app controls", sorted(controls)[:75], file=sys.stderr)
+    print("Foreground packages", sorted({node["package"] for node in nodes}), file=sys.stderr)
+    exits = device("dumpsys", "activity", "exit-info", PACKAGE)
+    for line in exits.splitlines():
+        if "reason=" in line or "description=" in line:
+            print("App exit", line.strip()[:320], file=sys.stderr)
+            break
+    crash = device("logcat", "-b", "crash", "-d", "-t", "80")
+    for line in crash.splitlines():
+        if any(tag in line for tag in ("FATAL EXCEPTION", "Exception:", "Abort message:", "signal ", "liborganicmaps.so", "libmapswithme.so")):
+            print("Guest crash", line.strip()[:360], file=sys.stderr)
     for node in nodes:
         if node["resource-id"].endswith(("/head_message", "/download_message", "/error")):
             print("Public fixture app status", node["text"][:180], file=sys.stderr)

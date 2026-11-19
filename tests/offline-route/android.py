@@ -94,6 +94,9 @@ def route(start, end):
             retried = True
         time.sleep(1)
     print("Observed app controls", sorted(controls)[:75], file=sys.stderr)
+    for node in nodes:
+        if node["resource-id"].endswith(("/head_message", "/download_message", "/error")):
+            print("Public fixture app status", node["text"][:180], file=sys.stderr)
     raise RuntimeError("no native route duration and distance")
 
 
@@ -113,12 +116,44 @@ assert_offline()
 assert adb("install", "--no-streaming", INPUTS / "OrganicMaps.apk", timeout=120).endswith("Success")
 assert adb("root").startswith(("restarting adbd as root", "adbd is already running as root"))
 adb("wait-for-device")
-base = f"/sdcard/Android/data/{PACKAGE}/files/{PINS['data_version']}"
-device("mkdir", "-p", base)
+# Bootstrap the original app so Android creates its own scoped storage and
+# Organic Maps selects its real writable directory before any bytes are staged.
+device("am", "start", "-W", "-n", COMPONENT)
+for _ in range(22):
+    try:
+        nodes = layout()
+    except (ET.ParseError, subprocess.TimeoutExpired, subprocess.CalledProcessError):
+        continue
+    for node in nodes:
+        if node["resource-id"].endswith("/permission_deny_button") and node["package"] == "com.android.permissioncontroller":
+            tap(node)
+    if any(node["resource-id"].endswith("/btn_download_resources") for node in nodes):
+        break
+    time.sleep(1)
+else:
+    raise RuntimeError("stock app did not initialize map storage")
+device("am", "force-stop", PACKAGE)
+internal = f"/data/user/0/{PACKAGE}/files"
+settings = device("cat", internal + "/settings.ini")
+configured, = re.findall(r"(?m)^StoragePath=(.+?)\s*$", settings)
+configured = configured.rstrip("/")
+allowed = {internal, f"/data/data/{PACKAGE}/files", f"/storage/emulated/0/Android/data/{PACKAGE}/files"}
+assert configured in allowed, "unexpected Organic Maps storage"
+# Stage into real app-owned internal storage. Organic Maps discovers already
+# installed maps when its configured directory contains no map files.
+base = f"{internal}/{PINS['data_version']}"
+uid = device("stat", "-c", "%u", internal)
+assert re.fullmatch(r"[1-9]\d{4,5}", uid)
+device("mkdir", base)
 for name, (_, _, digest) in PINS["maps"].items():
     dest = base + "/" + name + ".mwm"
     adb("push", INPUTS / (name + ".mwm"), dest, timeout=90)
     assert device("sha256sum", dest).split()[0] == digest
+device("chown", "-R", f"{uid}:{uid}", base)
+device("chmod", "0700", base)
+for name in PINS["maps"]:
+    device("chmod", "0600", base + "/" + name + ".mwm")
+device("restorecon", "-RF", base)
 adb("unroot")
 adb("wait-for-device")
 assert device("id", "-u") == "2000"

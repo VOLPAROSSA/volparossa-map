@@ -1,5 +1,11 @@
 # VOLPAROSSA Map integration
 
+Follow the [shared development workflow](https://github.com/VOLPAROSSA/volparossa/blob/main/docs/development/CODEX_WORKFLOW.md) for Codex, OpenCode and other coding agents.
+Start with the user's task and the relevant part of the [README](README.md).
+Choose available models, reasoning effort, tools and any delegation according
+to the task's complexity, risk and cost. Use targeted checks. Run builds and
+runtime trials on approved disposable hosted runners.
+
 - Integrate Organic Maps with the shared VOLPAROSSA core. Keep offline maps, search and
   navigation functional without VOLPAROSSA connectivity. Do not build another peer network.
 - Pin exact upstream sources and preserve Apache-2.0, third-party, OpenStreetMap and

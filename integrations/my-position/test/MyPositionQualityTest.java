@@ -90,6 +90,10 @@ public final class MyPositionQualityTest {
 
     // Inputs enter the unmodified Organic Maps provider callback on the isolated emulator.
     private static void supply(MwmActivity activity, boolean verticalAccuracy, long wallAgeMs) {
+        supply(activity, verticalAccuracy, wallAgeMs, false);
+    }
+
+    private static void supply(MwmActivity activity, boolean verticalAccuracy, long wallAgeMs, boolean simulated) {
         LocationHelper helper = MwmApplication.from(activity).getLocationHelper();
         helper.start();
         Location location = new Location("gps");
@@ -100,6 +104,7 @@ public final class MyPositionQualityTest {
         if (verticalAccuracy) location.setVerticalAccuracyMeters(4);
         location.setElapsedRealtimeNanos(SystemClock.elapsedRealtimeNanos());
         location.setTime(System.currentTimeMillis() - wallAgeMs);
+        if (simulated) location.setMock(true); // The installed trial runs on API 35.
         helper.onLocationChanged(location);
         assertSame("Organic Maps did not accept the fixture", location, helper.getSavedLocation());
     }
@@ -150,6 +155,42 @@ public final class MyPositionQualityTest {
             tap(quality);
             assertEquals(activity.getString(R.string.volparossa_quality_unavailable), visibleText(quality));
             observed("old_time_refused");
+        });
+    }
+
+    @Test public void simulatedFixProvenance() throws Exception {
+        MwmActivity activity = openFromLauncher();
+        openPosition(activity);
+        observed("position_open");
+        onUi(() -> {
+            MyPositionQuality quality = view(activity);
+            supply(activity, true, 0, true);
+            assertEquals("", visibleText(quality));
+            tap(quality);
+            assertEquals(activity.getString(R.string.volparossa_quality_simulated), visibleText(quality));
+            observed("simulated_fix_identified");
+            supply(activity, true, 0);
+            assertEquals("", visibleText(quality));
+            tap(quality);
+            assertEquals(activity.getString(R.string.volparossa_quality_single, 5.0), visibleText(quality));
+            observed("replacement_assessed_after_tap");
+            supply(activity, true, 6000, true);
+            tap(quality);
+            assertEquals(activity.getString(R.string.volparossa_quality_unavailable), visibleText(quality));
+            observed("stale_simulation_refused");
+
+            LocationHelper helper = MwmApplication.from(activity).getLocationHelper();
+            Location accepted = helper.getSavedLocation();
+            Location inaccurate = new Location(accepted);
+            inaccurate.setProvider("network");
+            inaccurate.setAccuracy(0);
+            helper.onLocationChanged(inaccurate);
+            assertSame(accepted, helper.getSavedLocation());
+            Location older = new Location(accepted);
+            older.setElapsedRealtimeNanos(accepted.getElapsedRealtimeNanos() - 1);
+            helper.onLocationChanged(older);
+            assertSame(accepted, helper.getSavedLocation());
+            observed("provider_filters_preserved");
         });
     }
 

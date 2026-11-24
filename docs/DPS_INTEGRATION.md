@@ -10,6 +10,8 @@ Open **My Position** in the VOLPAROSSA WebDebug app and tap **Check this fix onc
 
 A single eligible fix can show a comparison scale in metres. For example, horizontal and vertical estimates of 3 m and 4 m give a 5 m scale. The joint confidence of those estimates and the physical integrity of the position remain unknown. The sample must be less than five seconds old by both elapsed time and wall time. The summary clears when the fix changes, the time limit expires, the user taps **Clear position check**, or the panel leaves the foreground. Selecting another place hides the check. Returning requires a fresh tap. The original provider and offline route planner continue to use the ordinary Android position.
 
+When Android marks a recent fix as simulated, the panel shows that origin and withholds the numerical quality estimate. This uses the platform marker on the selected fix. An unmarked fix still has unknown integrity. The VOLPAROSSA Android build also removes full location values from the provider callback’s diagnostics. Rejections retain their filter reason.
+
 The source-build script takes the pinned Organic Maps checkout, pinned VOLPAROSSA Core checkout and Android ABI. It supports build preparation for `x86_64` and `arm64-v8a`. Its prerequisites include the Android SDK, NDK and Rust target. It packages the linked Cargo dependency notices, Rust standard-library and NDK notices, and Map license in the APK. The hosted workflow provisions the disposable x86-64 build and verifies the notice bytes inside the APK. [Source-build script](../integrations/my-position/assemble.sh) · [Core revision](../integrations/my-position/core-revision) · [Android workflow](../.github/workflows/native-android-source.yml)
 
 ## Installed application evidence

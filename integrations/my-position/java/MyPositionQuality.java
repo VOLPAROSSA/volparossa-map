@@ -15,6 +15,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.core.content.ContextCompat;
+import androidx.core.location.LocationCompat;
 import app.organicmaps.R;
 
 /** One user gesture evaluates one already accepted fix. The view never retains a Location. */
@@ -76,11 +77,9 @@ public final class MyPositionQuality extends LinearLayout {
         boolean granted = permitted();
         if (!granted) {
             message = getResources().getString(R.string.volparossa_quality_permission);
-        } else if (Build.VERSION.SDK_INT >= 26) {
+        } else {
             Location fix = source.current();
-            if (fix != null && fix.hasAltitude() && fix.hasAccuracy() && fix.hasVerticalAccuracy()
-                    && fix.getAccuracy() > 0 && fix.getVerticalAccuracyMeters() > 0) {
-                // Android's getAltitude is relative to the WGS84 ellipsoid. Do not substitute MSL.
+            if (fix != null) {
                 long fixNanos = fix.getElapsedRealtimeNanos();
                 long ageNanos = SystemClock.elapsedRealtimeNanos() - fixNanos;
                 long unixMs = System.currentTimeMillis();
@@ -88,11 +87,18 @@ public final class MyPositionQuality extends LinearLayout {
                 long wallAge = unixMs - observedMs;
                 if (fixNanos > 0 && ageNanos >= 0 && ageNanos < MAX_AGE_MS * 1_000_000L
                         && observedMs > 0 && wallAge >= 0 && wallAge < MAX_AGE_MS) {
-                    double scale = Math.hypot(fix.getAccuracy(), fix.getVerticalAccuracyMeters());
-                    if (Native.evaluate(fix, scale, unixMs)) {
-                        message = getResources().getString(R.string.volparossa_quality_single, scale);
-                        long ageMs = (ageNanos + 999_999) / 1_000_000;
-                        remaining = MAX_AGE_MS - Math.max(ageMs, wallAge);
+                    long ageMs = (ageNanos + 999_999) / 1_000_000;
+                    remaining = MAX_AGE_MS - Math.max(ageMs, wallAge);
+                    if (LocationCompat.isMock(fix)) {
+                        message = getResources().getString(R.string.volparossa_quality_simulated);
+                    } else if (Build.VERSION.SDK_INT >= 26 && fix.hasAltitude()
+                            && fix.hasAccuracy() && fix.hasVerticalAccuracy()
+                            && fix.getAccuracy() > 0 && fix.getVerticalAccuracyMeters() > 0) {
+                        // Android's getAltitude is relative to the WGS84 ellipsoid. Do not substitute MSL.
+                        double scale = Math.hypot(fix.getAccuracy(), fix.getVerticalAccuracyMeters());
+                        if (Native.evaluate(fix, scale, unixMs)) {
+                            message = getResources().getString(R.string.volparossa_quality_single, scale);
+                        }
                     }
                 }
             }

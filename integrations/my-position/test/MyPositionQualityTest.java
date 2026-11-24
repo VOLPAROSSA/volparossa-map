@@ -88,7 +88,7 @@ public final class MyPositionQualityTest {
     }
 
     // Inputs enter the unmodified Organic Maps provider callback on the isolated emulator.
-    private static void supply(MwmActivity activity, boolean verticalAccuracy) {
+    private static void supply(MwmActivity activity, boolean verticalAccuracy, long wallAgeMs) {
         LocationHelper helper = MwmApplication.from(activity).getLocationHelper();
         helper.start();
         Location location = new Location("gps");
@@ -98,7 +98,7 @@ public final class MyPositionQualityTest {
         location.setAccuracy(3);
         if (verticalAccuracy) location.setVerticalAccuracyMeters(4);
         location.setElapsedRealtimeNanos(SystemClock.elapsedRealtimeNanos());
-        location.setTime(System.currentTimeMillis());
+        location.setTime(System.currentTimeMillis() - wallAgeMs);
         helper.onLocationChanged(location);
         assertSame("Organic Maps did not accept the fixture", location, helper.getSavedLocation());
     }
@@ -123,20 +123,30 @@ public final class MyPositionQualityTest {
         onUi(() -> {
             assertEquals(PackageManager.PERMISSION_GRANTED, activity.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION));
             MyPositionQuality quality = view(activity);
-            supply(activity, true);
+            supply(activity, true, 0);
             assertEquals("", visibleText(quality));
             tap(quality);
             assertEquals(activity.getString(R.string.volparossa_quality_single, 5.0), visibleText(quality));
-            supply(activity, false);
+            supply(activity, false, 0);
             assertEquals("", visibleText(quality));
             tap(quality);
             assertEquals(activity.getString(R.string.volparossa_quality_unavailable), visibleText(quality));
             tap(quality);
-            supply(activity, true);
+            // A newly accepted Android event may still carry an old wall timestamp.
+            supply(activity, true, 6000);
+            tap(quality);
+            assertEquals(activity.getString(R.string.volparossa_quality_unavailable), visibleText(quality));
+            tap(quality);
+
+            // Use a frozen copy for the elapsed-time check. The live provider is allowed
+            // to replace its latest fix while this foreground place page stays open.
+            supply(activity, true, 0);
+            LocationHelper helper = MwmApplication.from(activity).getLocationHelper();
+            Location fixed = new Location(helper.getSavedLocation());
+            helper.stop();
+            quality.setSource(() -> fixed);
             tap(quality);
             assertEquals(activity.getString(R.string.volparossa_quality_single, 5.0), visibleText(quality));
-            // Keep this fix selected so its time limit alone clears the result.
-            MwmApplication.from(activity).getLocationHelper().stop();
         });
         SystemClock.sleep(5200);
         onUi(() -> {
@@ -144,13 +154,21 @@ public final class MyPositionQualityTest {
             assertEquals("", visibleText(quality));
             tap(quality);
             assertEquals(activity.getString(R.string.volparossa_quality_unavailable), visibleText(quality));
-            tap(quality);
-            supply(activity, true);
+            quality.setSource(null);
+        });
+        // Reselect via the ordinary Map callback to restore the actual current-fix supplier.
+        openPosition(activity);
+        onUi(() -> {
+            MyPositionQuality quality = view(activity);
+            supply(activity, true, 0);
             tap(quality);
             assertEquals(activity.getString(R.string.volparossa_quality_single, 5.0), visibleText(quality));
             assertTrue(activity.moveTaskToBack(true));
         });
-        await("The map remained in the foreground", () -> resumedMap() == null);
+        await("The map did not enter the background", () -> {
+            Stage stage = ActivityLifecycleMonitorRegistry.getInstance().getLifecycleStageOf(activity);
+            return stage == Stage.STOPPED || stage == Stage.DESTROYED;
+        });
         MwmActivity resumed = openFromLauncher();
         openPosition(resumed);
         onUi(() -> {

@@ -237,5 +237,6 @@ if mode == "web-debug-quality":
     result["synthetic_fix_in_main_place_page"] = dict(
         core_revision=(INPUTS / "map-quality-core").read_text().strip(), permission_denied=True,
         explicit_check=True, comparison_scale_metres=5.0, both_errors_required=True,
-        clear=True, expiry=True, background_revocation=True, other_places_hidden=True)
+        clear=True, new_fix_clears=True, fixed_observation_expiry=True, old_provider_time_refused=True,
+        background_revocation=True, other_places_hidden=True)
 (INPUTS / "observations.json").write_text(json.dumps(result, separators=(",", ":")) + "\n")

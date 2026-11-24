@@ -9,6 +9,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.location.Location;
+import android.os.Bundle;
 import android.os.SystemClock;
 import android.widget.Button;
 import android.widget.TextView;
@@ -103,23 +104,33 @@ public final class MyPositionQualityTest {
         assertSame("Organic Maps did not accept the fixture", location, helper.getSavedLocation());
     }
 
+    private static void observed(String check) {
+        Bundle status = new Bundle();
+        status.putString("volparossa_checkpoint", check);
+        InstrumentationRegistry.getInstrumentation().sendStatus(2, status);
+    }
+
     @Test public void permissionDenied() throws Exception {
         MwmActivity activity = openFromLauncher();
         openPosition(activity);
+        observed("position_open");
         onUi(() -> {
             assertEquals(PackageManager.PERMISSION_DENIED, activity.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION));
             MyPositionQuality quality = view(activity);
             assertEquals("", visibleText(quality));
             tap(quality);
             assertEquals(activity.getString(R.string.volparossa_quality_permission), visibleText(quality));
+            observed("permission_denied");
             tap(quality);
             assertEquals("", visibleText(quality));
+            observed("cleared");
         });
     }
 
-    @Test public void oneFixClearExpiryAndSelection() throws Exception {
+    @Test public void acceptedAndIncompleteFixes() throws Exception {
         MwmActivity activity = openFromLauncher();
         openPosition(activity);
+        observed("position_open");
         onUi(() -> {
             assertEquals(PackageManager.PERMISSION_GRANTED, activity.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION));
             MyPositionQuality quality = view(activity);
@@ -127,55 +138,74 @@ public final class MyPositionQualityTest {
             assertEquals("", visibleText(quality));
             tap(quality);
             assertEquals(activity.getString(R.string.volparossa_quality_single, 5.0), visibleText(quality));
+            observed("single_fix_after_tap");
             supply(activity, false, 0);
             assertEquals("", visibleText(quality));
+            observed("replacement_cleared");
             tap(quality);
             assertEquals(activity.getString(R.string.volparossa_quality_unavailable), visibleText(quality));
+            observed("missing_vertical_refused");
             tap(quality);
-            // A newly accepted Android event may still carry an old wall timestamp.
             supply(activity, true, 6000);
             tap(quality);
             assertEquals(activity.getString(R.string.volparossa_quality_unavailable), visibleText(quality));
-            tap(quality);
+            observed("old_time_refused");
+        });
+    }
 
-            // Use a frozen copy for the elapsed-time check. The live provider is allowed
-            // to replace its latest fix while this foreground place page stays open.
+    @Test public void expiryOfSelectedObservation() throws Exception {
+        MwmActivity activity = openFromLauncher();
+        openPosition(activity);
+        observed("position_open");
+        onUi(() -> {
+            MyPositionQuality quality = view(activity);
             supply(activity, true, 0);
             LocationHelper helper = MwmApplication.from(activity).getLocationHelper();
+            // A fresh copy models a fixed selected observation just for this expiry check.
             Location fixed = new Location(helper.getSavedLocation());
             helper.stop();
             quality.setSource(() -> fixed);
             tap(quality);
             assertEquals(activity.getString(R.string.volparossa_quality_single, 5.0), visibleText(quality));
+            observed("selected_fix_shown");
         });
         SystemClock.sleep(5200);
         onUi(() -> {
             MyPositionQuality quality = view(activity);
             assertEquals("", visibleText(quality));
+            observed("selected_fix_cleared");
             tap(quality);
             assertEquals(activity.getString(R.string.volparossa_quality_unavailable), visibleText(quality));
-            quality.setSource(null);
+            observed("expired_fix_refused");
         });
-        // Reselect via the ordinary Map callback to restore the actual current-fix supplier.
+    }
+
+    @Test public void foregroundAndSelectionRevocation() throws Exception {
+        MwmActivity activity = openFromLauncher();
         openPosition(activity);
+        observed("position_open");
         onUi(() -> {
             MyPositionQuality quality = view(activity);
             supply(activity, true, 0);
             tap(quality);
             assertEquals(activity.getString(R.string.volparossa_quality_single, 5.0), visibleText(quality));
+            observed("single_fix_after_tap");
             assertTrue(activity.moveTaskToBack(true));
         });
         await("The map did not enter the background", () -> {
             Stage stage = ActivityLifecycleMonitorRegistry.getInstance().getLifecycleStageOf(activity);
             return stage == Stage.STOPPED || stage == Stage.DESTROYED;
         });
+        observed("map_backgrounded");
         MwmActivity resumed = openFromLauncher();
         openPosition(resumed);
         onUi(() -> {
             MyPositionQuality quality = view(resumed);
             assertEquals("", visibleText(quality));
+            observed("resumed_without_assessment");
             resumed.onPlacePageActivated(MapObject.createMapObject(MapObject.API_POINT, "Place", "", 43.737, 7.427));
             assertFalse(quality.isShown());
+            observed("other_place_hidden");
         });
     }
 }

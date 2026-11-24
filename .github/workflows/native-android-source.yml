@@ -11,6 +11,7 @@ on:
       - tests/offline-route/inputs.json
       - tests/offline-route/inputs.py
       - tests/offline-route/android.py
+      - tests/offline-route/my_position.py
       - tests/offline-route/emulator.sh
       - tests/offline-route/run_guest.py
 permissions:
@@ -71,3 +72,10 @@ jobs:
           name: organic-maps-source-android
           path: ${{ env.ROUTE_TRIAL }}/receipt.json
           if-no-files-found: error
+      - name: Retain partial per-case observations when the installed app trial fails
+        if: failure() && env.ROUTE_TRIAL != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: map-current-fix-progress-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.ROUTE_TRIAL }}/my-position-progress.json
+          if-no-files-found: ignore

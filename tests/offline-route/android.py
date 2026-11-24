@@ -220,23 +220,8 @@ result = dict(map_commit=os.environ["GITHUB_SHA"], organic_maps_source=PINS["sou
 if mode.startswith("web-debug"):
     result.update(android_source_build="WebDebug", application_id=PACKAGE, built_abi="x86_64")
 if mode == "web-debug-quality":
-    assert adb("install", "--no-streaming", INPUTS / "map-quality-tests.apk", timeout=120).endswith("Success")
-    suite = "org.volparossa.map.dps.MyPositionQualityTest"
-    runner = PACKAGE + ".test/androidx.test.runner.AndroidJUnitRunner"
-    for permission, method in [(False, "permissionDenied"), (True, "oneFixClearExpiryAndSelection")]:
-        if permission:
-            for name in ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"]:
-                device("pm", "clear-permission-flags", PACKAGE, "android.permission." + name, "user-set", "user-fixed")
-                device("pm", "grant", PACKAGE, "android.permission." + name)
-        run = device("am", "instrument", "-w", "-e", "class", suite + "#" + method, runner, timeout=150)
-        if "OK (1 test)" not in run or "FAILURES" in run:
-            raise RuntimeError("My Position instrumentation failed: " + run[-4000:])
-        device("am", "force-stop", PACKAGE)
+    from my_position import exercise
+    result["synthetic_fix_in_main_place_page"] = exercise(INPUTS, PACKAGE, result, adb, device)
     assert_offline()
     assert not device("pidof", PACKAGE, check=False)
-    result["synthetic_fix_in_main_place_page"] = dict(
-        core_revision=(INPUTS / "map-quality-core").read_text().strip(), permission_denied=True,
-        explicit_check=True, comparison_scale_metres=5.0, both_errors_required=True,
-        clear=True, new_fix_clears=True, fixed_observation_expiry=True, old_provider_time_refused=True,
-        background_revocation=True, other_places_hidden=True)
 (INPUTS / "observations.json").write_text(json.dumps(result, separators=(",", ":")) + "\n")

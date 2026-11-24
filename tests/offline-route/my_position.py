@@ -12,7 +12,7 @@ CASES = {
     "acceptedAndIncompleteFixes": ("position_open", "single_fix_after_tap", "replacement_cleared",
                                    "missing_vertical_refused", "old_time_refused"),
     "simulatedFixProvenance": ("position_open", "simulated_fix_identified",
-                               "replacement_assessed_after_tap", "stale_simulation_refused"),
+                               "replacement_assessed_after_tap", "stale_simulation_refused", "provider_filters_preserved"),
     "expiryOfSelectedObservation": ("position_open", "selected_fix_shown", "selected_fix_cleared", "expired_fix_refused"),
     "foregroundAndSelectionRevocation": ("position_open", "single_fix_after_tap", "map_backgrounded",
                                          "resumed_without_assessment", "other_place_hidden"),
@@ -75,6 +75,15 @@ def exercise(inputs, package, routes, adb, device):
                 case["same_boot"] = original_guest[0] == final_guest[0]
                 case["same_system_server"] = original_guest[1] == final_guest[1]
             case["test_source_lines"] = sorted(set(int(line) for line in re.findall(r"MyPositionQualityTest\.java:(\d+)", raw)))
+        if method == "simulatedFixProvenance" and case["status"] == "passed":
+            # Inspect only the pinned provider callback in this isolated emulator. Retain counts only.
+            log = device("logcat", "-b", "main", "-d", "-v", "raw", "-s", "LocationState:D")
+            callback_messages = re.findall(r"LocationHelper\.java:\d+ onLocationChanged\(\): (.*)$", log, re.MULTILINE)
+            rejected = {"Location update rejected by accuracy filter", "Location update did not improve the saved fix"}
+            seen = set(callback_messages)
+            if not rejected <= seen <= (rejected | {"Provider is not active"}):
+                case["status"] = "provider_diagnostics_failed"
+            case["coordinate_free_callback_messages"] = sum(message in rejected for message in callback_messages)
         save()
         print(method, case, flush=True)
         if case["status"] != "passed":

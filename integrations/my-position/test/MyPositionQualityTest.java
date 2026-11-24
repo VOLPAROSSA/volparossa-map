@@ -178,6 +178,19 @@ public final class MyPositionQualityTest {
             tap(quality);
             assertEquals(activity.getString(R.string.volparossa_quality_unavailable), visibleText(quality));
             observed("stale_simulation_refused");
+
+            LocationHelper helper = MwmApplication.from(activity).getLocationHelper();
+            Location accepted = helper.getSavedLocation();
+            Location inaccurate = new Location(accepted);
+            inaccurate.setProvider("network");
+            inaccurate.setAccuracy(0);
+            helper.onLocationChanged(inaccurate);
+            assertSame(accepted, helper.getSavedLocation());
+            Location older = new Location(accepted);
+            older.setElapsedRealtimeNanos(accepted.getElapsedRealtimeNanos() - 1);
+            helper.onLocationChanged(older);
+            assertSame(accepted, helper.getSavedLocation());
+            observed("provider_filters_preserved");
         });
     }
 

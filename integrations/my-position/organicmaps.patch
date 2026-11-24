@@ -86,3 +86,34 @@
    implementation project(':sdk')
    implementation project(':sdk:car')
    implementation project(':sdk:widgets:lanes')
+diff --git a/android/sdk/src/main/java/app/organicmaps/sdk/location/LocationHelper.java b/android/sdk/src/main/java/app/organicmaps/sdk/location/LocationHelper.java
+index 63ff011..59c9498 100644
+--- a/android/sdk/src/main/java/app/organicmaps/sdk/location/LocationHelper.java
++++ b/android/sdk/src/main/java/app/organicmaps/sdk/location/LocationHelper.java
+@@ -198,8 +198,6 @@ public class LocationHelper implements BaseLocationProvider.Listener
+   @Override
+   public void onLocationChanged(@NonNull Location location)
+   {
+-    Logger.d(TAG, "provider = " + mLocationProvider.getClass().getSimpleName() + " location = " + location);
+-
+     if (!isActive())
+     {
+       Logger.w(TAG, "Provider is not active");
+@@ -208,7 +206,7 @@ public class LocationHelper implements BaseLocationProvider.Listener
+
+     if (!LocationUtils.isAccuracySatisfied(location))
+     {
+-      Logger.w(TAG, "Unsatisfied accuracy for location = " + location);
++      Logger.w(TAG, "Location update rejected by accuracy filter");
+       return;
+     }
+
+@@ -216,7 +214,7 @@ public class LocationHelper implements BaseLocationProvider.Listener
+     {
+       if (!LocationUtils.isLocationBetterThanLast(location, mSavedLocation))
+       {
+-        Logger.d(TAG, "The new " + location + " is worse than the last " + mSavedLocation);
++        Logger.d(TAG, "Location update did not improve the saved fix");
+         return;
+       }
+     }

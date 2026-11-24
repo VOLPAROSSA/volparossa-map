@@ -94,9 +94,4 @@ public compute. Each feature needs its own actual app integration proof.
 
 ## Shared decentralized positioning
 
-The optional DPS location-source boundary, pinned Android/iOS lifecycle seams,
-coordinate conversion requirements and staged acceptance criteria are recorded
-in [DPS_INTEGRATION.md](DPS_INTEGRATION.md), including the next app-owned Android
-bridge and synthetic lifecycle fixture. The bounded core assessment is merged;
-native Map adaptation, sensor acquisition and positioning improvement remain
-unaccepted.
+The Android WebDebug app can assess a single current fix locally from its **My Position** place page after an explicit tap and precise location permission. An installed emulator trial verified the coordinate-free summary, expiry and revocation with fictional provider inputs. Physical positioning accuracy, sensor fusion and iOS integration remain open. [Current user path, Android evidence and platform boundaries](DPS_INTEGRATION.md)

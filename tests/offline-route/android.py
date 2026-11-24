@@ -154,7 +154,19 @@ device("cmd", "connectivity", "airplane-mode", "enable")
 device("svc", "wifi", "disable")
 device("svc", "data", "disable")
 assert_offline()
-assert adb("install", "--no-streaming", INPUTS / "OrganicMaps.apk", timeout=120).endswith("Success")
+install_args = []
+build = None
+if mode.startswith("web-debug"):
+    build = json.loads((INPUTS / "android-build.json").read_bytes())
+    assert build["abi"] in {"x86_64", "arm64-v8a"} and build["apk_sha256"] == apk_digest
+    guest_abi = device("getprop", "ro.product.cpu.abi")
+    supported = device("getprop", "ro.product.cpu.abilist").split(",")
+    assert guest_abi == "x86_64" and build["abi"] in supported, "guest does not support the selected app ABI"
+    install_args = ["--abi", build["abi"]]
+assert adb("install", "--no-streaming", *install_args, INPUTS / "OrganicMaps.apk", timeout=120).endswith("Success")
+if build:
+    packages = device("dumpsys", "package", PACKAGE)
+    assert re.search(r"^\s*primaryCpuAbi=" + re.escape(build["abi"]) + r"\s*$", packages, re.MULTILINE), "installed ABI mismatch"
 print("Organic Maps installed", flush=True)
 set_adb_identity("root", "0")
 # Bootstrap the original app so Android creates its own scoped storage and
@@ -217,8 +229,10 @@ result = dict(map_commit=os.environ["GITHUB_SHA"], organic_maps_source=PINS["sou
               maps_version=PINS["data_version"], monaco_sha256=PINS["maps"]["Monaco"][2], android_api=device("getprop", "ro.build.version.sdk"),
               native_pedestrian_route_summaries=summaries, cold_app_launches=2, host_namespace_interfaces=["lo"],
               guest_airplane_mode=True, app_stopped=True)
-if mode.startswith("web-debug"):
-    result.update(android_source_build="WebDebug", application_id=PACKAGE, built_abi="x86_64")
+if build:
+    result.update(android_source_build="WebDebug", application_id=PACKAGE, built_abi=build["abi"],
+                  installed_abi=build["abi"], guest_abi=guest_abi, native_translation=guest_abi != build["abi"],
+                  emulator_build_fingerprint=device("getprop", "ro.build.fingerprint"))
 if mode == "web-debug-quality":
     from my_position import exercise
     result["synthetic_fix_in_main_place_page"] = exercise(INPUTS, PACKAGE, result, adb, device)

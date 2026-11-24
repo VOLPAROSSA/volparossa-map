@@ -14,14 +14,14 @@ import time
 import xml.etree.ElementTree as ET
 
 ADB, INPUTS, mode = sys.argv[1], Path(sys.argv[2]), sys.argv[3]
-assert mode in {"release", "web-debug"}
+assert mode in {"release", "web-debug", "web-debug-quality"}
 PINS = json.loads(Path(__file__).with_name("inputs.json").read_bytes())
 built_digest = INPUTS / "web-debug-apk.sha256"
-expected_digest = built_digest.read_text().strip() if mode == "web-debug" else PINS["apk_sha256"]
+expected_digest = built_digest.read_text().strip() if mode.startswith("web-debug") else PINS["apk_sha256"]
 with (INPUTS / "OrganicMaps.apk").open("rb") as stream:
     apk_digest = hashlib.file_digest(stream, "sha256").hexdigest()
 assert apk_digest == expected_digest
-PACKAGE = "app.organicmaps.web.debug" if mode == "web-debug" else "app.organicmaps.web"
+PACKAGE = "app.organicmaps.web.debug" if mode.startswith("web-debug") else "app.organicmaps.web"
 COMPONENT = PACKAGE + "/app.organicmaps.SplashActivity"
 # Two public street points, no device location or personal route.
 START = "43.73731,7.42668"
@@ -217,6 +217,11 @@ result = dict(map_commit=os.environ["GITHUB_SHA"], organic_maps_source=PINS["sou
               maps_version=PINS["data_version"], monaco_sha256=PINS["maps"]["Monaco"][2], android_api=device("getprop", "ro.build.version.sdk"),
               native_pedestrian_route_summaries=summaries, cold_app_launches=2, host_namespace_interfaces=["lo"],
               guest_airplane_mode=True, app_stopped=True)
-if mode == "web-debug":
+if mode.startswith("web-debug"):
     result.update(android_source_build="WebDebug", application_id=PACKAGE, built_abi="x86_64")
+if mode == "web-debug-quality":
+    from my_position import exercise
+    result["synthetic_fix_in_main_place_page"] = exercise(INPUTS, PACKAGE, result, adb, device)
+    assert_offline()
+    assert not device("pidof", PACKAGE, check=False)
 (INPUTS / "observations.json").write_text(json.dumps(result, separators=(",", ":")) + "\n")

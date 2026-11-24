@@ -31,6 +31,10 @@ Map head `bd9eb42d` and the tested merge `7010c26d` share tree `4800d5eb`. The t
 
 Earlier attempts preserve the direct-Activity cold-start failure, the expired-fix test that read a live provider, and the Android instrumentation abort. The final trial reported each independent case against the same installed application. [Cold start](https://github.com/VOLPAROSSA/volparossa-map/actions/runs/45412651741) · [Live provider](https://github.com/VOLPAROSSA/volparossa-map/actions/runs/45417232018) · [Instrumentation abort](https://github.com/VOLPAROSSA/volparossa-map/actions/runs/45419469459)
 
+On the tree merged as Map `6a547d90`, a second disconnected WebDebug trial ran the four cases above plus a fifth using the Android simulated-location marker. The control displayed the source warning, cleared on replacement, assessed a fresh unmarked fix after a new tap, and refused a stale marked fix. The provider retained the accepted fix when two replacements failed its filters. The callback emitted exactly two fixed diagnostic messages for those rejections. The same installed APK routed the two 390 m and 490 m public walks after separate cold starts. [Original receipt](evidence/simulated-fix-45507438201/receipt.json) · [Hosted Android run](https://github.com/VOLPAROSSA/volparossa-map/actions/runs/45507438201/attempts/2)
+
+The trial used Core `d8cac7a2`, an ancestor of its protected merge `e5daf201`. The changes between those revisions were confined to mail documentation, topology workflows and integration tests. The library sources, workspace lock and Android build inputs match. Attempt 1 stopped during Gradle resolution of the upstream Play publisher plugin. Attempt 2 passed on the same source. [Original failure logs](evidence/simulated-fix-45507438201/attempt-1-build-logs.zip) · [Original successful archive](evidence/simulated-fix-45507438201/organic-maps-source-android.zip) · [Source and archive digests](evidence/simulated-fix-45507438201/verification.json)
+
 ## Existing native inputs
 
 The pinned upstream revision is Organic Maps `b20d1417`. [Upstream pin and licenses](UPSTREAM.md)

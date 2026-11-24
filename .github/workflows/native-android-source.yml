@@ -17,8 +17,9 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: map-current-fix-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: false
+  # An explicit rerun of an earlier PR commit must not cancel the latest build.
+  group: map-current-fix-${{ github.ref }}-${{ github.event_name == 'pull_request' && github.run_attempt > 1 && github.run_id || 'latest' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && github.run_attempt == 1 }}
 jobs:
   android:
     name: Source-built WebDebug on the offline Android emulator

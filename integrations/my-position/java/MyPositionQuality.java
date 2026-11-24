@@ -54,6 +54,7 @@ public final class MyPositionQuality extends LinearLayout {
     }
 
     public void clear() {
+        if (expiresAt == 0 && summary.getVisibility() == GONE) return;
         expiresAt = 0;
         usesPrecisePermission = false;
         removeCallbacks(expiry);

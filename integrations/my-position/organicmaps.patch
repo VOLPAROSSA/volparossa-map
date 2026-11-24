@@ -42,6 +42,17 @@
      if (mapObject == null)
        return;
      // Starting the download will fire this callback but the object will be the same
+@@ -1137,7 +1151,10 @@
+     if (mMapObject == null)
+       return;
+     if (mMapObject.isMyPosition())
++    {
++      mPositionQuality.clear();
+       refreshMyPosition(location);
++    }
+     else
+       refreshDistanceToObject(location);
+   }
 --- a/android/app/src/main/res/layout/place_page_details.xml
 +++ b/android/app/src/main/res/layout/place_page_details.xml
 @@ -67,6 +67,11 @@

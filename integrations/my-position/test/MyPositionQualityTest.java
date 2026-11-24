@@ -92,15 +92,16 @@ public final class MyPositionQualityTest {
                 assertEquals("", visibleText(quality));
                 tap(quality);
                 assertEquals(activity.getString(R.string.volparossa_quality_single, 5.0), visibleText(quality));
-                tap(quality);
-                assertEquals("", visibleText(quality));
                 supply(activity, false);
+                assertEquals("", visibleText(quality));
                 tap(quality);
                 assertEquals(activity.getString(R.string.volparossa_quality_unavailable), visibleText(quality));
                 tap(quality);
                 supply(activity, true);
                 tap(quality);
                 assertEquals(activity.getString(R.string.volparossa_quality_single, 5.0), visibleText(quality));
+                // Keep this fix selected so its time limit alone clears the result.
+                MwmApplication.from(activity).getLocationHelper().stop();
             });
             SystemClock.sleep(5200);
             scenario.onActivity(activity -> assertEquals("", visibleText(view(activity))));

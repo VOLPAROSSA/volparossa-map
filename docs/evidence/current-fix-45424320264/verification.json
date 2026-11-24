@@ -1,0 +1,14 @@
+{
+  "artifact_bytes": 939,
+  "artifact_digest": "sha256:4a47dcc09a949b1378abf4ea9b7a915a65fa5758ffceab4194a76582b9db611d",
+  "artifact_id": 14936094469,
+  "artifact_name": "organic-maps-source-android",
+  "head": "bd9eb42d359085ee04927ce66d2ec5838975af72",
+  "job": "138552031091",
+  "members": {
+    "receipt.json": "2d00bbeb38e43455ffa906473fa010795c36b0176065bbe5fca3c1fc545ee902"
+  },
+  "run": "45424320264",
+  "tested": "7010c26dfe23d0c4f94369a0d57acdcf2c494682",
+  "tree": "4800d5eb8f3213e1218c26f4aca3e2da2231beb7"
+}

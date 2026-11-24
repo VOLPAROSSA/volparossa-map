@@ -18,6 +18,8 @@ On the unmodified Linux desktop, the regular **Offline Search** found the Oceano
 
 The published Organic Maps Android app calculated two pedestrian routes on the Monaco map after separate cold starts with airplane mode enabled and only loopback available to the emulator. The native route planner reported 390 m in 6 minutes and 490 m in 7 minutes. The separate patched Linux desktop applied 719 synthetic observations to the actual Monaco graph. Its car route changed from 1.08 km to 3.75 km and returned to the same 1.08 km route at expiry. [Desktop traffic trial](docs/NATIVE_TRAFFIC.md) [Android trial](https://github.com/VOLPAROSSA/volparossa-map/actions/runs/44444481182) · [Native integration](docs/INTEGRATION.md)
 
+In the VOLPAROSSA Android WebDebug build, **My Position** can check the latest available fix on the device after an explicit tap. It displays a short-lived quality summary derived from Android’s horizontal and vertical error estimates. The installed x86-64 emulator trial used fictional fixes and preserved both offline routes. [My Position and its limits](docs/DPS_INTEGRATION.md)
+
 ## What the network can add
 
 - **Maps and updates:** reuse authenticated public map chunks from nearby or remote peers,

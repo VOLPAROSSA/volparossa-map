@@ -39,6 +39,8 @@ jobs:
           git init -q "$core"
           git -C "$core" fetch --depth=1 https://github.com/VOLPAROSSA/volparossa.git "$pin"
           git -C "$core" checkout --quiet --detach FETCH_HEAD
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'ndk;29.0.14206865' 'platforms;android-36' 'build-tools;36.0.0'
+          rustup toolchain install 1.89.0 --profile minimal --target x86_64-linux-android
           bash integrations/my-position/assemble.sh "$RUNNER_TEMP/organic-source" "$core" x86_64
           trial=$(mktemp -d "$RUNNER_TEMP/map-quality.XXXXXX")
           echo "ROUTE_TRIAL=$trial" >> "$GITHUB_ENV"
@@ -46,6 +48,18 @@ jobs:
           mapfile -t apks < <(find "$apkdir/web/debug" -maxdepth 1 -name '*.apk' -type f)
           mapfile -t tests < <(find "$apkdir/androidTest/web/debug" -maxdepth 1 -name '*.apk' -type f)
           [[ ${#apks[@]} -eq 1 && ${#tests[@]} -eq 1 ]]
+          python3 - "${apks[0]}" "$RUNNER_TEMP/organic-source/android/app/src/main/assets/volparossa-licenses" <<'PYTHON'
+          from pathlib import Path
+          from zipfile import ZipFile
+          import sys
+          directory = Path(sys.argv[2])
+          assert (directory / 'crates/DEPENDENCIES.tsv').stat().st_size > 0
+          with ZipFile(sys.argv[1]) as apk:
+              assert apk.getinfo('lib/x86_64/libvolparossa_map_quality.so').file_size > 0
+              for original in directory.rglob('*'):
+                  if original.is_file():
+                      assert apk.read('assets/volparossa-licenses/' + str(original.relative_to(directory))) == original.read_bytes()
+          PYTHON
           python3 -B tests/offline-route/inputs.py "$trial" --upstream "$RUNNER_TEMP/organic-source" --built-apk "${apks[0]}"
           install -m 0600 "${tests[0]}" "$trial/map-quality-tests.apk"
           cp integrations/my-position/core-revision "$trial/map-quality-core"

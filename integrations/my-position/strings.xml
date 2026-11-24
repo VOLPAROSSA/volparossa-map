@@ -4,5 +4,6 @@
   <string name="volparossa_clear_position">Clear position check</string>
   <string name="volparossa_quality_unavailable">Quality unavailable for this fix. A recent fix with horizontal and vertical accuracy and a supported local assessor are required.</string>
   <string name="volparossa_quality_permission">Precise location permission is required to check this fix.</string>
+  <string name="volparossa_quality_simulated">Android marked this fix as simulated. Its physical position cannot be assessed.</string>
   <string name="volparossa_quality_single">One device fix. Horizontal and vertical error estimates give a comparison scale of %1$.1f m. Joint confidence and position integrity are unknown.</string>
 </resources>

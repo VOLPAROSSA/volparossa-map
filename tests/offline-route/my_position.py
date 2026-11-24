@@ -11,6 +11,8 @@ CASES = {
     "permissionDenied": ("position_open", "permission_denied", "cleared"),
     "acceptedAndIncompleteFixes": ("position_open", "single_fix_after_tap", "replacement_cleared",
                                    "missing_vertical_refused", "old_time_refused"),
+    "simulatedFixProvenance": ("position_open", "simulated_fix_identified",
+                               "replacement_assessed_after_tap", "stale_simulation_refused"),
     "expiryOfSelectedObservation": ("position_open", "selected_fix_shown", "selected_fix_cleared", "expired_fix_refused"),
     "foregroundAndSelectionRevocation": ("position_open", "single_fix_after_tap", "map_backgrounded",
                                          "resumed_without_assessment", "other_place_hidden"),

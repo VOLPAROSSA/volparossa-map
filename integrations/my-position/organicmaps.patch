@@ -1,0 +1,77 @@
+--- a/android/app/src/main/java/app/organicmaps/widget/placepage/PlacePageView.java
++++ b/android/app/src/main/java/app/organicmaps/widget/placepage/PlacePageView.java
+@@ -104,6 +104,7 @@
+   private static final String TRACK_SHARE_MENU_ID = "TRACK_SHARE_MENU_ID";
+
+   private View mFrame;
++  private org.volparossa.map.dps.MyPositionQuality mPositionQuality;
+   // Preview.
+   private ViewGroup mPreview;
+   private Toolbar mToolbar;
+@@ -260,6 +261,7 @@
+         EditBookmarkFragment.REQUEST_KEY, getViewLifecycleOwner(), (key, result) -> handleEditBookmarkResult(result));
+
+     mFrame = view;
++    mPositionQuality = view.findViewById(R.id.volparossa_position_quality);
+     mFrame.setOnClickListener((v) -> mPlacePageViewListener.onPlacePageRequestToggleState());
+
+     mPreview = mFrame.findViewById(R.id.pp__preview);
+@@ -384,6 +386,13 @@
+   }
+
+   @Override
++  public void onPause()
++  {
++    mPositionQuality.clear();
++    super.onPause();
++  }
++
++  @Override
+   public void onStop()
+   {
+     super.onStop();
+@@ -1105,6 +1114,11 @@
+   @Override
+   public void onChanged(@Nullable MapObject mapObject)
+   {
++    if (mapObject == null || !mapObject.isMyPosition())
++      mPositionQuality.setSource(null);
++    else if (mPositionQuality.getVisibility() != VISIBLE)
++      mPositionQuality.setSource(() -> isResumed()
++          ? MwmApplication.from(requireContext()).getLocationHelper().getSavedLocation() : null);
+     if (mapObject == null)
+       return;
+     // Starting the download will fire this callback but the object will be the same
+--- a/android/app/src/main/res/layout/place_page_details.xml
++++ b/android/app/src/main/res/layout/place_page_details.xml
+@@ -67,6 +67,11 @@
+     <!-- ToDo: Address is missing compared with iOS. It's shown in title but anyway .. -->
+
+     <include layout="@layout/place_page_latlon"/>
++    <org.volparossa.map.dps.MyPositionQuality
++        android:id="@+id/volparossa_position_quality"
++        android:layout_width="match_parent"
++        android:layout_height="wrap_content"
++        android:saveEnabled="false" />
+
+     <include layout="@layout/place_page_open_in"/>
+   </LinearLayout>
+--- a/android/app/build.gradle
++++ b/android/app/build.gradle
+@@ -61,6 +61,7 @@
+   }
+
+   defaultConfig {
++    testInstrumentationRunner = 'androidx.test.runner.AndroidJUnitRunner'
+     versionCode = rootProject.ext.versionCode
+     versionName = rootProject.ext.versionName
+     println('Version: ' + versionName)
+@@ -222,6 +223,8 @@
+   implementation project(':libs:routing')
+   implementation project(':libs:utils')
+
++  androidTestImplementation libs.androidx.junit
++  androidTestImplementation libs.androidx.test.runner
+   implementation project(':sdk')
+   implementation project(':sdk:car')
+   implementation project(':sdk:widgets:lanes')

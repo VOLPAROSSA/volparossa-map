@@ -6,7 +6,7 @@ umask 077
 [[ "$GITHUB_ACTIONS:$RUNNER_ENVIRONMENT" = true:github-hosted ]]
 [[ "$(git rev-parse HEAD)" = "$GITHUB_SHA" ]]
 mode=${1:-release}
-[[ $# -le 1 && ( $mode = release || $mode = web-debug ) ]]
+[[ $# -le 1 && ( $mode = release || $mode = web-debug || $mode = web-debug-quality ) ]]
 trial=$ROUTE_TRIAL
 repo=$GITHUB_WORKSPACE
 sdk=${ANDROID_HOME:?}

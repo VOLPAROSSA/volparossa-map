@@ -102,5 +102,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: map-current-fix-progress-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ env.ROUTE_TRIAL }}/my-position-progress.json
+          path: |
+            ${{ env.ROUTE_TRIAL }}/android-startup.json
+            ${{ env.ROUTE_TRIAL }}/my-position-progress.json
           if-no-files-found: ignore

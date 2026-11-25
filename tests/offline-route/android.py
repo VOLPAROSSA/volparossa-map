@@ -15,6 +15,7 @@ import xml.etree.ElementTree as ET
 
 ADB, INPUTS, mode = sys.argv[1], Path(sys.argv[2]), sys.argv[3]
 assert mode in {"release", "web-debug", "web-debug-quality"}
+PERMISSION_CONTROLLERS = {"com.android.permissioncontroller", "com.google.android.permissioncontroller"}
 PINS = json.loads(Path(__file__).with_name("inputs.json").read_bytes())
 built_digest = INPUTS / "web-debug-apk.sha256"
 expected_digest = built_digest.read_text().strip() if mode.startswith("web-debug") else PINS["apk_sha256"]
@@ -68,6 +69,14 @@ def tap(node):
     device("input", "tap", (a+c)//2, (b+d)//2)
 
 
+def permission_denial(node):
+    if node["package"] not in PERMISSION_CONTROLLERS or node.get("enabled") != "true":
+        return False
+    rid = node["resource-id"].split("/")[-1]
+    label = node["text"].strip().replace("’", "'").casefold()
+    return rid in {"permission_deny_button", "permission_deny_and_dont_ask_again_button"} or label in {"don't allow", "deny"}
+
+
 def open_route(start, end):
     uri = f"om://route?sll={start}&saddr=Public-A&dll={end}&daddr=Public-B&type=pedestrian"
     output = device("am", "start", "-W", "-n", COMPONENT, "-a", "android.intent.action.VIEW", "-d", uri)
@@ -101,9 +110,7 @@ def route(start, end, previous_summary):
                         summaries.add(label)
             if not node.get("enabled") == "true":
                 continue
-            if pkg == "com.android.permissioncontroller" and (
-                    rid in {"permission_deny_button", "permission_deny_and_dont_ask_again_button"}
-                    or label.replace("’", "'").casefold() in {"don't allow", "deny"}):
+            if permission_denial(node):
                 tap(node)
                 break
             if pkg == PACKAGE and label.casefold() in {"accept", "continue", "next", "done", "got it", "ok", "close", "understood"}:
@@ -123,7 +130,7 @@ def route(start, end, previous_summary):
     print("Foreground packages", sorted({node["package"] for node in nodes}), file=sys.stderr)
     print("Observed native route summaries", sorted(summaries)[:8], file=sys.stderr)
     for node in nodes:
-        if node["package"] == "com.android.permissioncontroller" and node["text"]:
+        if node["package"] in PERMISSION_CONTROLLERS and node["text"]:
             print("Android permission dialog", node["resource-id"], node["text"][:120], file=sys.stderr)
     exits = device("dumpsys", "activity", "exit-info", PACKAGE)
     for line in exits.splitlines():
@@ -171,22 +178,39 @@ print("Organic Maps installed", flush=True)
 set_adb_identity("root", "0")
 # Bootstrap the original app so Android creates its own scoped storage and
 # Organic Maps selects its real writable directory before any bytes are staged.
+internal = f"/data/user/0/{PACKAGE}/files"
 device("am", "start", "-W", "-n", COMPONENT)
-for _ in range(22):
+nodes = []
+deadline = time.monotonic() + 90
+while time.monotonic() < deadline:
+    # This app-owned setting also gates the subsequent map staging. A particular
+    # download-screen widget need not appear on every supported system image.
+    if re.search(r"(?m)^StoragePath=\S", device("cat", internal + "/settings.ini", check=False)):
+        break
     try:
         nodes = layout()
     except (ET.ParseError, subprocess.TimeoutExpired, subprocess.CalledProcessError):
+        time.sleep(1)
         continue
     for node in nodes:
-        if node["resource-id"].endswith("/permission_deny_button") and node["package"] == "com.android.permissioncontroller":
+        if permission_denial(node):
             tap(node)
-    if any(node["resource-id"].endswith("/btn_download_resources") for node in nodes):
-        break
+            break
     time.sleep(1)
 else:
-    raise RuntimeError("stock app did not initialize map storage")
+    # Only aggregate diagnostics and bounded resource IDs from the disposable
+    # guest go to the receipt. Do not retain settings, crash logs or UI labels.
+    crash = device("logcat", "-b", "crash", "-d", "-t", "150", "-v", "raw")
+    activity = {node["package"] + "/" + node["resource-id"] for node in nodes}
+    progress = dict(map_commit=os.environ["GITHUB_SHA"], apk_sha256=apk_digest,
+                    guest_abi=device("getprop", "ro.product.cpu.abi"), installed_abi=build["abi"] if build else None,
+                    app_running=bool(device("pidof", PACKAGE, check=False)), storage_initialized=False,
+                    visible_controls=sorted(a for a in activity if re.fullmatch(r"[a-zA-Z0-9_/.:]{1,180}", a))[:48],
+                    crash_signatures=sorted(s for s in ("UnsatisfiedLinkError", "SIGILL", "SIGABRT", "SIGSEGV",
+                                                        "FATAL EXCEPTION", "dlopen failed") if s in crash))
+    (INPUTS / "android-startup.json").write_text(json.dumps(progress, sort_keys=True) + "\n")
+    raise RuntimeError("Organic Maps did not initialize its storage")
 device("am", "force-stop", PACKAGE)
-internal = f"/data/user/0/{PACKAGE}/files"
 settings = device("cat", internal + "/settings.ini")
 configured, = re.findall(r"(?m)^StoragePath=(.+?)\s*$", settings)
 configured = configured.rstrip("/")

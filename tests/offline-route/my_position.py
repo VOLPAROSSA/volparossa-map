@@ -15,7 +15,7 @@ CASES = {
                                "replacement_assessed_after_tap", "stale_simulation_refused", "provider_filters_preserved"),
     "expiryOfSelectedObservation": ("position_open", "selected_fix_shown", "selected_fix_cleared", "expired_fix_refused"),
     "foregroundAndSelectionRevocation": ("position_open", "single_fix_after_tap", "map_backgrounded",
-                                         "resumed_without_assessment", "other_place_hidden"),
+                                         "existing_task_requested", "resumed_without_assessment", "other_place_hidden"),
 }
 
 

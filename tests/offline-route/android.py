@@ -84,12 +84,44 @@ def open_route(start, end):
     return uri
 
 
-def route(start, end, previous_summary):
+def route_progress(reason, nodes, completed, observed, waits):
+    # The fixture uses two public routes. Keep only bounded UI identifiers and
+    # measured durations/distances; never upload a UI dump or device crash log.
+    controls = {n["package"] + "/" + n["resource-id"] for n in nodes}
+    progress = dict(map_commit=os.environ["GITHUB_SHA"], apk_sha256=apk_digest, reason=reason,
+                    completed=completed, observed=sorted(observed)[:8], system_waits=waits,
+                    visible_controls=sorted(c for c in controls if re.fullmatch(r"[a-zA-Z0-9_/.:]{1,180}", c))[:120])
+    (INPUTS / "android-route-progress.json").write_text(json.dumps(progress, sort_keys=True) + "\n")
+
+
+def close_translated_route(completed, waits):
+    deadline = time.monotonic() + 35
+    nodes = []
+    tapped = False
+    while time.monotonic() < deadline:
+        try:
+            nodes = layout()
+        except (ET.ParseError, subprocess.TimeoutExpired, subprocess.CalledProcessError):
+            continue
+        app = {n["resource-id"].split("/")[-1]: n for n in nodes if n["package"] == PACKAGE}
+        if tapped and "map" in app and "routing_types_frame" not in app and "time" not in app:
+            return
+        if not tapped and "routing_types_frame" in app and "back" in app:
+            tap(app["back"])
+            tapped = True
+        time.sleep(.5)
+    route_progress("planner_did_not_close", nodes, completed, [], waits)
+    raise RuntimeError("the previous native route did not close")
+
+
+def route(start, end, completed, waits, translated):
+    previous_summary = completed[-1] if completed else None
     assert_offline()
     device("logcat", "-b", "crash", "-c")
     open_route(start, end)
     deadline = time.monotonic() + 115
     retried = False
+    waited = False
     controls = set()
     summaries = set()
     nodes = []
@@ -113,6 +145,12 @@ def route(start, end, previous_summary):
             if permission_denial(node):
                 tap(node)
                 break
+            if translated and not waited and pkg == "android" and node["resource-id"] == "android:id/aerr_wait":
+                # Permit one system-provided Wait action and keep it in the receipt.
+                tap(node)
+                waited = True
+                waits.append(len(completed) + 1)
+                break
             if pkg == PACKAGE and label.casefold() in {"accept", "continue", "next", "done", "got it", "ok", "close", "understood"}:
                 tap(node)
                 break
@@ -126,6 +164,7 @@ def route(start, end, previous_summary):
             open_route(start, end)
             retried = True
         time.sleep(1)
+    route_progress("distinct_native_summary_unavailable", nodes, completed, summaries, waits)
     print("Observed app controls", sorted(controls)[:75], file=sys.stderr)
     print("Foreground packages", sorted({node["package"] for node in nodes}), file=sys.stderr)
     print("Observed native route summaries", sorted(summaries)[:8], file=sys.stderr)
@@ -241,17 +280,24 @@ for permission in ("ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "POST_NOTIF
     device("pm", "set-permission-flags", PACKAGE, full_name, "user-set", "user-fixed")
     state = device("dumpsys", "package", PACKAGE)
     assert re.search(re.escape(full_name) + r": granted=false, flags=\[[^\]]*USER_FIXED", state)
-summaries = []
+summaries_completed = []
+system_waits = []
+translated = bool(build and guest_abi != build["abi"])
 for start, end in ROUTES:
+    if translated and summaries_completed:
+        # Finish the first route in the app before the next cold start. The
+        # translated engine must independently calculate the second route.
+        close_translated_route(summaries_completed, system_waits)
     device("am", "force-stop", PACKAGE)
-    summaries.append(route(start, end, summaries[-1] if summaries else None))
-assert len(set(summaries)) == 2 and all(re.search(r"[1-9]", s.split("•")[1]) for s in summaries)
+    summaries_completed.append(route(start, end, summaries_completed, system_waits, translated))
+assert len(set(summaries_completed)) == 2 and all(re.search(r"[1-9]", s.split("•")[1]) for s in summaries_completed)
 assert_offline()
 device("am", "force-stop", PACKAGE)
 assert not device("pidof", PACKAGE, check=False)
 result = dict(map_commit=os.environ["GITHUB_SHA"], organic_maps_source=PINS["source"], apk_sha256=apk_digest,
               maps_version=PINS["data_version"], monaco_sha256=PINS["maps"]["Monaco"][2], android_api=device("getprop", "ro.build.version.sdk"),
-              native_pedestrian_route_summaries=summaries, cold_app_launches=2, host_namespace_interfaces=["lo"],
+              native_pedestrian_route_summaries=summaries_completed, cold_app_launches=2,
+              closed_planner_between_launches=translated, system_wait_actions=system_waits, host_namespace_interfaces=["lo"],
               guest_airplane_mode=True, app_stopped=True)
 if build:
     result.update(android_source_build="WebDebug", application_id=PACKAGE, built_abi=build["abi"],

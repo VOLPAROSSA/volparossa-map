@@ -104,5 +104,6 @@ jobs:
           name: map-current-fix-progress-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ env.ROUTE_TRIAL }}/android-startup.json
+            ${{ env.ROUTE_TRIAL }}/android-route-progress.json
             ${{ env.ROUTE_TRIAL }}/my-position-progress.json
           if-no-files-found: ignore

@@ -226,8 +226,9 @@ public final class MyPositionQualityTest {
         MwmActivity activity = openFromLauncher();
         openPosition(activity);
         observed("position_open");
+        MyPositionQuality initial = ui(() -> view(activity));
         onUi(() -> {
-            MyPositionQuality quality = view(activity);
+            MyPositionQuality quality = initial;
             supply(activity, true, 0);
             tap(quality);
             assertEquals(activity.getString(R.string.volparossa_quality_single, 5.0), visibleText(quality));
@@ -240,8 +241,8 @@ public final class MyPositionQualityTest {
         });
         observed("map_backgrounded");
         onUi(() -> {
-            MyPositionQuality previous = view(activity);
-            if (previous != null) assertEquals("", visibleText(previous));
+            assertEquals("", visibleText(initial));
+            observed("background_assessment_cleared");
             ActivityManager manager = activity.getSystemService(ActivityManager.class);
             for (ActivityManager.AppTask task : manager.getAppTasks()) {
                 if (task.getTaskInfo().taskId == activity.getTaskId()) {

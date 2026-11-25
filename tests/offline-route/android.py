@@ -15,6 +15,7 @@ import xml.etree.ElementTree as ET
 
 ADB, INPUTS, mode = sys.argv[1], Path(sys.argv[2]), sys.argv[3]
 assert mode in {"release", "web-debug", "web-debug-quality"}
+PERMISSION_CONTROLLERS = {"com.android.permissioncontroller", "com.google.android.permissioncontroller"}
 PINS = json.loads(Path(__file__).with_name("inputs.json").read_bytes())
 built_digest = INPUTS / "web-debug-apk.sha256"
 expected_digest = built_digest.read_text().strip() if mode.startswith("web-debug") else PINS["apk_sha256"]
@@ -68,6 +69,14 @@ def tap(node):
     device("input", "tap", (a+c)//2, (b+d)//2)
 
 
+def permission_denial(node):
+    if node["package"] not in PERMISSION_CONTROLLERS or node.get("enabled") != "true":
+        return False
+    rid = node["resource-id"].split("/")[-1]
+    label = node["text"].strip().replace("’", "'").casefold()
+    return rid in {"permission_deny_button", "permission_deny_and_dont_ask_again_button"} or label in {"don't allow", "deny"}
+
+
 def open_route(start, end):
     uri = f"om://route?sll={start}&saddr=Public-A&dll={end}&daddr=Public-B&type=pedestrian"
     output = device("am", "start", "-W", "-n", COMPONENT, "-a", "android.intent.action.VIEW", "-d", uri)
@@ -75,12 +84,44 @@ def open_route(start, end):
     return uri
 
 
-def route(start, end, previous_summary):
+def route_progress(reason, nodes, completed, observed, waits):
+    # The fixture uses two public routes. Keep only bounded UI identifiers and
+    # measured durations/distances; never upload a UI dump or device crash log.
+    controls = {n["package"] + "/" + n["resource-id"] for n in nodes}
+    progress = dict(map_commit=os.environ["GITHUB_SHA"], apk_sha256=apk_digest, reason=reason,
+                    completed=completed, observed=sorted(observed)[:8], system_waits=waits,
+                    visible_controls=sorted(c for c in controls if re.fullmatch(r"[a-zA-Z0-9_/.:]{1,180}", c))[:120])
+    (INPUTS / "android-route-progress.json").write_text(json.dumps(progress, sort_keys=True) + "\n")
+
+
+def close_translated_route(completed, waits):
+    deadline = time.monotonic() + 35
+    nodes = []
+    tapped = False
+    while time.monotonic() < deadline:
+        try:
+            nodes = layout()
+        except (ET.ParseError, subprocess.TimeoutExpired, subprocess.CalledProcessError):
+            continue
+        app = {n["resource-id"].split("/")[-1]: n for n in nodes if n["package"] == PACKAGE}
+        if tapped and "map" in app and "routing_types_frame" not in app and "time" not in app:
+            return
+        if not tapped and "routing_types_frame" in app and "back" in app:
+            tap(app["back"])
+            tapped = True
+        time.sleep(.5)
+    route_progress("planner_did_not_close", nodes, completed, [], waits)
+    raise RuntimeError("the previous native route did not close")
+
+
+def route(start, end, completed, waits, translated):
+    previous_summary = completed[-1] if completed else None
     assert_offline()
     device("logcat", "-b", "crash", "-c")
     open_route(start, end)
     deadline = time.monotonic() + 115
     retried = False
+    waited = False
     controls = set()
     summaries = set()
     nodes = []
@@ -101,10 +142,14 @@ def route(start, end, previous_summary):
                         summaries.add(label)
             if not node.get("enabled") == "true":
                 continue
-            if pkg == "com.android.permissioncontroller" and (
-                    rid in {"permission_deny_button", "permission_deny_and_dont_ask_again_button"}
-                    or label.replace("’", "'").casefold() in {"don't allow", "deny"}):
+            if permission_denial(node):
                 tap(node)
+                break
+            if translated and not waited and pkg == "android" and node["resource-id"] == "android:id/aerr_wait":
+                # Permit one system-provided Wait action and keep it in the receipt.
+                tap(node)
+                waited = True
+                waits.append(len(completed) + 1)
                 break
             if pkg == PACKAGE and label.casefold() in {"accept", "continue", "next", "done", "got it", "ok", "close", "understood"}:
                 tap(node)
@@ -119,11 +164,12 @@ def route(start, end, previous_summary):
             open_route(start, end)
             retried = True
         time.sleep(1)
+    route_progress("distinct_native_summary_unavailable", nodes, completed, summaries, waits)
     print("Observed app controls", sorted(controls)[:75], file=sys.stderr)
     print("Foreground packages", sorted({node["package"] for node in nodes}), file=sys.stderr)
     print("Observed native route summaries", sorted(summaries)[:8], file=sys.stderr)
     for node in nodes:
-        if node["package"] == "com.android.permissioncontroller" and node["text"]:
+        if node["package"] in PERMISSION_CONTROLLERS and node["text"]:
             print("Android permission dialog", node["resource-id"], node["text"][:120], file=sys.stderr)
     exits = device("dumpsys", "activity", "exit-info", PACKAGE)
     for line in exits.splitlines():
@@ -154,27 +200,56 @@ device("cmd", "connectivity", "airplane-mode", "enable")
 device("svc", "wifi", "disable")
 device("svc", "data", "disable")
 assert_offline()
-assert adb("install", "--no-streaming", INPUTS / "OrganicMaps.apk", timeout=120).endswith("Success")
+install_args = []
+build = None
+if mode.startswith("web-debug"):
+    build = json.loads((INPUTS / "android-build.json").read_bytes())
+    assert build["abi"] in {"x86_64", "arm64-v8a"} and build["apk_sha256"] == apk_digest
+    guest_abi = device("getprop", "ro.product.cpu.abi")
+    supported = device("getprop", "ro.product.cpu.abilist").split(",")
+    assert guest_abi == "x86_64" and build["abi"] in supported, "guest does not support the selected app ABI"
+    install_args = ["--abi", build["abi"]]
+assert adb("install", "--no-streaming", *install_args, INPUTS / "OrganicMaps.apk", timeout=120).endswith("Success")
+if build:
+    packages = device("dumpsys", "package", PACKAGE)
+    assert re.search(r"^\s*primaryCpuAbi=" + re.escape(build["abi"]) + r"\s*$", packages, re.MULTILINE), "installed ABI mismatch"
 print("Organic Maps installed", flush=True)
 set_adb_identity("root", "0")
 # Bootstrap the original app so Android creates its own scoped storage and
 # Organic Maps selects its real writable directory before any bytes are staged.
+internal = f"/data/user/0/{PACKAGE}/files"
 device("am", "start", "-W", "-n", COMPONENT)
-for _ in range(22):
+nodes = []
+deadline = time.monotonic() + 90
+while time.monotonic() < deadline:
+    # This app-owned setting also gates the subsequent map staging. A particular
+    # download-screen widget need not appear on every supported system image.
+    if re.search(r"(?m)^StoragePath=\S", device("cat", internal + "/settings.ini", check=False)):
+        break
     try:
         nodes = layout()
     except (ET.ParseError, subprocess.TimeoutExpired, subprocess.CalledProcessError):
+        time.sleep(1)
         continue
     for node in nodes:
-        if node["resource-id"].endswith("/permission_deny_button") and node["package"] == "com.android.permissioncontroller":
+        if permission_denial(node):
             tap(node)
-    if any(node["resource-id"].endswith("/btn_download_resources") for node in nodes):
-        break
+            break
     time.sleep(1)
 else:
-    raise RuntimeError("stock app did not initialize map storage")
+    # Only aggregate diagnostics and bounded resource IDs from the disposable
+    # guest go to the receipt. Do not retain settings, crash logs or UI labels.
+    crash = device("logcat", "-b", "crash", "-d", "-t", "150", "-v", "raw")
+    activity = {node["package"] + "/" + node["resource-id"] for node in nodes}
+    progress = dict(map_commit=os.environ["GITHUB_SHA"], apk_sha256=apk_digest,
+                    guest_abi=device("getprop", "ro.product.cpu.abi"), installed_abi=build["abi"] if build else None,
+                    app_running=bool(device("pidof", PACKAGE, check=False)), storage_initialized=False,
+                    visible_controls=sorted(a for a in activity if re.fullmatch(r"[a-zA-Z0-9_/.:]{1,180}", a))[:48],
+                    crash_signatures=sorted(s for s in ("UnsatisfiedLinkError", "SIGILL", "SIGABRT", "SIGSEGV",
+                                                        "FATAL EXCEPTION", "dlopen failed") if s in crash))
+    (INPUTS / "android-startup.json").write_text(json.dumps(progress, sort_keys=True) + "\n")
+    raise RuntimeError("Organic Maps did not initialize its storage")
 device("am", "force-stop", PACKAGE)
-internal = f"/data/user/0/{PACKAGE}/files"
 settings = device("cat", internal + "/settings.ini")
 configured, = re.findall(r"(?m)^StoragePath=(.+?)\s*$", settings)
 configured = configured.rstrip("/")
@@ -205,20 +280,29 @@ for permission in ("ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "POST_NOTIF
     device("pm", "set-permission-flags", PACKAGE, full_name, "user-set", "user-fixed")
     state = device("dumpsys", "package", PACKAGE)
     assert re.search(re.escape(full_name) + r": granted=false, flags=\[[^\]]*USER_FIXED", state)
-summaries = []
+summaries_completed = []
+system_waits = []
+translated = bool(build and guest_abi != build["abi"])
 for start, end in ROUTES:
+    if translated and summaries_completed:
+        # Finish the first route in the app before the next cold start. The
+        # translated engine must independently calculate the second route.
+        close_translated_route(summaries_completed, system_waits)
     device("am", "force-stop", PACKAGE)
-    summaries.append(route(start, end, summaries[-1] if summaries else None))
-assert len(set(summaries)) == 2 and all(re.search(r"[1-9]", s.split("•")[1]) for s in summaries)
+    summaries_completed.append(route(start, end, summaries_completed, system_waits, translated))
+assert len(set(summaries_completed)) == 2 and all(re.search(r"[1-9]", s.split("•")[1]) for s in summaries_completed)
 assert_offline()
 device("am", "force-stop", PACKAGE)
 assert not device("pidof", PACKAGE, check=False)
 result = dict(map_commit=os.environ["GITHUB_SHA"], organic_maps_source=PINS["source"], apk_sha256=apk_digest,
               maps_version=PINS["data_version"], monaco_sha256=PINS["maps"]["Monaco"][2], android_api=device("getprop", "ro.build.version.sdk"),
-              native_pedestrian_route_summaries=summaries, cold_app_launches=2, host_namespace_interfaces=["lo"],
+              native_pedestrian_route_summaries=summaries_completed, cold_app_launches=2,
+              closed_planner_between_launches=translated, system_wait_actions=system_waits, host_namespace_interfaces=["lo"],
               guest_airplane_mode=True, app_stopped=True)
-if mode.startswith("web-debug"):
-    result.update(android_source_build="WebDebug", application_id=PACKAGE, built_abi="x86_64")
+if build:
+    result.update(android_source_build="WebDebug", application_id=PACKAGE, built_abi=build["abi"],
+                  installed_abi=build["abi"], guest_abi=guest_abi, native_translation=guest_abi != build["abi"],
+                  emulator_build_fingerprint=device("getprop", "ro.build.fingerprint"))
 if mode == "web-debug-quality":
     from my_position import exercise
     result["synthetic_fix_in_main_place_page"] = exercise(INPUTS, PACKAGE, result, adb, device)

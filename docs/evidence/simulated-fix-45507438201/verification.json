@@ -1,0 +1,24 @@
+{
+  "run": 45507438201,
+  "successful_attempt": 2,
+  "job": 138857799472,
+  "tested": "f41e21d4aeb247c3762c19e47308ebc342cf7365",
+  "head": "426ca252de36937b37d1fc753bd407ea1a7aff07",
+  "protected_merge": "6a547d9074debb0324df2d017ae0fee8647e4a66",
+  "tree": "403efe58fe520cf1750663f39c5c2d4b975250f6",
+  "tested_core": "d8cac7a246f40c371a54546cf9c37a6b25f9072c",
+  "protected_core_merge": "e5daf201f289f4ddb9918e5795dbc9f07bb8b324",
+  "artifact_id": 14976751000,
+  "artifact_name": "organic-maps-source-android",
+  "artifact_bytes": 1018,
+  "artifact_digest": "sha256:77a2971384dd503d2eab304fdf33d34a24d48694bdac0b35014259181fc5ed3b",
+  "members": {
+    "receipt.json": "8d837bbb4e4fc32f2de3ad99aa3548652f8de106fb752025583c9609061f105a"
+  },
+  "failed_attempt": {
+    "attempt": 1,
+    "job": 138846321012,
+    "archive": "attempt-1-build-logs.zip",
+    "archive_sha256": "210ea21db2785247882a9b28e449ee33c762cf2092d7b3711ce889eb6970c5ac"
+  }
+}

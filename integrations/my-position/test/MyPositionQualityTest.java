@@ -5,6 +5,7 @@ import static org.junit.Assert.*;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.ActivityManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -225,8 +226,9 @@ public final class MyPositionQualityTest {
         MwmActivity activity = openFromLauncher();
         openPosition(activity);
         observed("position_open");
+        MyPositionQuality initial = ui(() -> view(activity));
         onUi(() -> {
-            MyPositionQuality quality = view(activity);
+            MyPositionQuality quality = initial;
             supply(activity, true, 0);
             tap(quality);
             assertEquals(activity.getString(R.string.volparossa_quality_single, 5.0), visibleText(quality));
@@ -238,8 +240,29 @@ public final class MyPositionQualityTest {
             return stage == Stage.STOPPED || stage == Stage.DESTROYED;
         });
         observed("map_backgrounded");
-        MwmActivity resumed = openFromLauncher();
-        openPosition(resumed);
+        onUi(() -> {
+            assertEquals("", visibleText(initial));
+            observed("background_assessment_cleared");
+            ActivityManager manager = activity.getSystemService(ActivityManager.class);
+            for (ActivityManager.AppTask task : manager.getAppTasks()) {
+                if (task.getTaskInfo().taskId == activity.getTaskId()) {
+                    // Restore the existing Android task as Recents does. A new
+                    // launcher intent can create a separate, transient SplashActivity.
+                    task.moveToFront();
+                    return;
+                }
+            }
+            fail("The background map task was not available");
+        });
+        observed("existing_task_requested");
+        await("The original map task did not resume", () -> {
+            MwmActivity current = resumedMap();
+            return current != null && current.getTaskId() == activity.getTaskId();
+        });
+        MwmActivity resumed = ui(MyPositionQualityTest::resumedMap);
+        assertNotNull(resumed);
+        if (!ui(() -> view(resumed) != null && view(resumed).isShown() && view(resumed).hasWindowFocus()))
+            openPosition(resumed);
         onUi(() -> {
             MyPositionQuality quality = view(resumed);
             assertEquals("", visibleText(quality));

@@ -12,7 +12,8 @@ import zipfile
 parser = argparse.ArgumentParser()
 parser.add_argument("root", type=Path)
 parser.add_argument("--upstream", type=Path, help="use this pinned source tree's release catalogue")
-parser.add_argument("--built-apk", type=Path, help="use a locally assembled WebDebug x86-64 package")
+parser.add_argument("--built-apk", type=Path, help="use a locally assembled WebDebug package")
+parser.add_argument("--built-abi", choices=["x86_64", "arm64-v8a"], default="x86_64")
 args = parser.parse_args()
 if args.built_apk and not args.upstream:
     parser.error("--built-apk requires --upstream")
@@ -36,12 +37,33 @@ if args.upstream:
     catalog = json.loads((args.upstream / "data/countries.json").read_bytes())
     if args.built_apk:
         with zipfile.ZipFile(args.built_apk) as archive:
-            assert archive.getinfo("lib/x86_64/liborganicmaps.so").file_size > 0
+            libraries = [name for name in archive.namelist() if name.startswith("lib/") and name.endswith(".so")]
+            abi_libraries = [name for name in libraries if name.startswith(f"lib/{args.built_abi}/")]
+            assert f"lib/{args.built_abi}/liborganicmaps.so" in abi_libraries
+            if args.built_abi == "arm64-v8a":
+                assert libraries == abi_libraries, "the ARM64 trial requires a single-ABI APK"
+            expected_machine = {"x86_64": 62, "arm64-v8a": 183}[args.built_abi]
+            library_digests = {}
+            for name in abi_libraries:
+                with archive.open(name) as lib:
+                    header = lib.read(20)
+                    assert header[:6] == b"\x7fELF\x02\x01" and len(header) == 20
+                    assert int.from_bytes(header[18:20], "little") == expected_machine
+                    sha = hashlib.sha256(header)
+                    while chunk := lib.read(1 << 20):
+                        sha.update(chunk)
+                library_digests[name] = sha.hexdigest()
             assert json.loads(archive.read("assets/countries.json")) == catalog
         shutil.copyfile(args.built_apk, apk)
         with apk.open("rb") as stream:
             digest = hashlib.file_digest(stream, "sha256").hexdigest()
         (root / "web-debug-apk.sha256").write_text(digest + "\n")
+        build = dict(abi=args.built_abi, elf_machine=expected_machine, apk_sha256=digest,
+                     native_libraries=library_digests, organic_maps_source=pins["source"],
+                     map_commit=subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip())
+        if "lib/" + args.built_abi + "/libvolparossa_map_quality.so" in libraries:
+            build["core_revision"] = Path("integrations/my-position/core-revision").read_text().strip()
+        (root / "android-build.json").write_text(json.dumps(build, sort_keys=True) + "\n")
 else:
     download("https://github.com/organicmaps/organicmaps/releases/download/" + pins["release"] +
              "/OrganicMaps-26092932-web-release.apk", apk, 63888223, pins["apk_sha256"])
